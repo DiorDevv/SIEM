@@ -1,0 +1,43 @@
+# Secrets — never commit
+.env
+ssl/*.key
+ssl/*.crt
+ssl/*.pem
+ssl/*.csr
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+.nuxt/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker volumes (local data)
+data/
+postgres_data/
+redis_data/

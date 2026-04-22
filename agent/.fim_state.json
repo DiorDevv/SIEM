@@ -1,0 +1,34 @@
+{
+  "/etc/passwd": {
+    "hash": "c69bc8960753c173a7cb4b2574f45153345ddd7dbfe5ecd9db305ba0d0f9033a",
+    "size": 2935,
+    "mtime": 1754304779.6188498,
+    "mode": 33188,
+    "uid": 0,
+    "gid": 0
+  },
+  "/etc/hosts": {
+    "hash": "be23617b39e837e1c51a31605fc848db3ef5902ab587380e1fbb6a4fe56fe6ff",
+    "size": 234,
+    "mtime": 1754248044.9374413,
+    "mode": 33188,
+    "uid": 0,
+    "gid": 0
+  },
+  "/etc/hostname": {
+    "hash": "537f3cbd1b86a56f2b5ec618c4f950a7f55037b4ec40dbee601ef4f5b293c853",
+    "size": 20,
+    "mtime": 1754248044.9374413,
+    "mode": 33188,
+    "uid": 0,
+    "gid": 0
+  },
+  "/etc/crontab": {
+    "hash": "ffb48ad57868ed639fad049d11ef4b9bcdd3d2d3e556754ce69b4d6b016969a3",
+    "size": 1136,
+    "mtime": 1711843587.0,
+    "mode": 33188,
+    "uid": 0,
+    "gid": 0
+  }
+}

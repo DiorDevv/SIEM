@@ -1,0 +1,32 @@
+manager_url: http://localhost:8000
+agent_name: my-agent
+check_interval: 60
+heartbeat_interval: 30
+
+log_paths:
+  - /var/log/syslog
+  - /var/log/auth.log
+  - /var/log/kern.log
+  - /var/log/messages
+
+fim_paths:
+  - /etc/passwd
+  - /etc/shadow
+  - /etc/hosts
+  - /etc/crontab
+  - /etc/sudoers
+
+fim_interval: 300
+
+vuln_interval: 3600
+sca_interval: 3600
+windows_events_max: 500
+
+windows_event_logs:
+  - Security
+  - System
+  - Application
+
+batch_size: 100
+log_level: INFO
+agent_id_file: .agent_id
