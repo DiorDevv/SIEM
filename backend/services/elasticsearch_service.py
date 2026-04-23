@@ -37,6 +37,7 @@ INDEX_MAPPING = {
             "parsed_fields": {"type": "object", "dynamic": True},
         }
     },
+
     "settings": {
         "number_of_shards":   settings.ES_NUMBER_OF_SHARDS,
         "number_of_replicas": settings.ES_NUMBER_OF_REPLICAS,
