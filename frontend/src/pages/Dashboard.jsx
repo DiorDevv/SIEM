@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { getDashboardStats } from '../api'
+import { getDashboardStats, getSystemHealth } from '../api'
 import StatsCard from '../components/StatsCard'
 import {
   AlertsAreaChart, LogsBarChart, SeverityPieChart,
@@ -390,18 +390,29 @@ function ThreatGauge({ stats }) {
 }
 
 /* ── System health panel ──────────────────────────────────── */
-function SystemHealth({ stats }) {
+function SystemHealth({ stats, health }) {
   const { t } = useLang()
-  const allOk = stats?.offline_agents === 0 && (stats?.total_agents || 0) > 0
+  const checks = health?.checks || {}
+  const agentOk = (stats?.total_agents || 0) > 0 && stats?.offline_agents === 0
+
+  const isOk = (val) => {
+    if (!val) return null
+    return val === 'ok' || val === 'green' || val === 'yellow'
+  }
+
   const items = [
-    { label: 'Backend API',   ok: true,  icon: '⚡' },
-    { label: 'Elasticsearch', ok: true,  icon: '🔍' },
-    { label: 'Agent Network', ok: allOk, icon: '🌐' },
-    { label: 'Rule Engine',   ok: true,  icon: '⚙️' },
-    { label: 'Database',      ok: true,  icon: '🗄️' },
-    { label: 'Redis Cache',   ok: true,  icon: '⚡' },
+    { label: 'Backend API',   ok: true,          status: 'ok',                            icon: '⚡' },
+    { label: 'Database',      ok: isOk(checks.database),   status: checks.database,       icon: '🗄️' },
+    { label: 'Elasticsearch', ok: isOk(checks.elasticsearch), status: checks.elasticsearch, icon: '🔍' },
+    { label: 'Redis Cache',   ok: isOk(checks.redis),     status: checks.redis,           icon: '⚡' },
+    { label: 'Agent Network', ok: agentOk,        status: agentOk ? 'ok' : `${stats?.offline_agents ?? 0} offline`, icon: '🌐' },
+    { label: 'Rule Engine',   ok: isOk(checks.database),  status: isOk(checks.database) ? 'ok' : 'degraded', icon: '⚙️' },
   ]
-  const healthy = items.filter((i) => i.ok).length
+
+  const loading = !health
+  const healthy = items.filter((i) => i.ok === true).length
+  const allGood = items.every((i) => i.ok === true)
+
   return (
     <div className="rounded-2xl p-5"
       style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', minHeight: 220 }}>
@@ -409,32 +420,45 @@ function SystemHealth({ stats }) {
         <span className="text-xs font-semibold uppercase tracking-wider"
           style={{ color: 'var(--text-muted)' }}>{t('dashboard.systemStatus')}</span>
         <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-          style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981',
-            border: '1px solid rgba(16,185,129,0.3)' }}>
-          {healthy}/{items.length} OK
+          style={{
+            background: allGood ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.12)',
+            color:      allGood ? '#10b981' : '#ef4444',
+            border:     `1px solid ${allGood ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.25)'}`,
+          }}>
+          {loading ? '...' : `${healthy}/${items.length} OK`}
         </span>
       </div>
       <div className="space-y-2.5">
-        {items.map((item) => (
-          <div key={item.label} className="flex items-center justify-between py-1.5 px-3 rounded-xl"
-            style={{ background: 'var(--bg-secondary)' }}>
-            <div className="flex items-center gap-2.5">
-              <span className="text-sm">{item.icon}</span>
-              <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
+        {items.map((item) => {
+          const statusOk  = item.ok === true
+          const statusErr = item.ok === false
+          const statusUnk = item.ok === null
+          const label = item.status
+            ? (statusErr && item.status !== item.label
+                ? item.status.replace(/^error:\s*/i, '').slice(0, 24)
+                : statusOk ? t('dashboard.allSystemsGo') : item.status)
+            : (loading ? '...' : '—')
+          return (
+            <div key={item.label} className="flex items-center justify-between py-1.5 px-3 rounded-xl"
+              style={{ background: 'var(--bg-secondary)' }}>
+              <div className="flex items-center gap-2.5">
+                <span className="text-sm">{item.icon}</span>
+                <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full"
+                  style={{
+                    background: statusOk ? '#10b981' : statusUnk ? '#6b7280' : '#ef4444',
+                    boxShadow:  statusOk ? '0 0 6px #10b98180' : statusUnk ? 'none' : '0 0 6px #ef444480',
+                  }} />
+                <span className="text-xs font-semibold truncate max-w-[80px]"
+                  style={{ color: statusOk ? '#6ee7b7' : statusUnk ? '#9ca3af' : '#fca5a5' }}>
+                  {label}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full"
-                style={{
-                  background:  item.ok ? '#10b981' : '#ef4444',
-                  boxShadow:   item.ok ? '0 0 6px #10b98180' : '0 0 6px #ef444480',
-                }} />
-              <span className="text-xs font-semibold"
-                style={{ color: item.ok ? '#6ee7b7' : '#fca5a5' }}>
-                {item.ok ? t('dashboard.allSystemsGo') : 'ERR'}
-              </span>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
@@ -697,9 +721,10 @@ function LiveTicker({ stats }) {
 /* ═══════════════════════════════════════════════════════════ */
 export default function Dashboard() {
   const { t } = useLang()
-  const [stats, setStats]           = useState(null)
-  const [loading, setLoading]       = useState(true)
-  const [error, setError]           = useState(null)
+  const [stats, setStats]             = useState(null)
+  const [health, setHealth]           = useState(null)
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState(null)
   const [lastRefresh, setLastRefresh] = useState(null)
 
   const fetchStats = useCallback(async () => {
@@ -715,11 +740,22 @@ export default function Dashboard() {
     }
   }, [t])
 
+  const fetchHealth = useCallback(async () => {
+    try {
+      const resp = await getSystemHealth()
+      setHealth(resp.data)
+    } catch {
+      setHealth({ status: 'error', checks: { database: 'error', elasticsearch: 'error', redis: 'error' } })
+    }
+  }, [])
+
   useEffect(() => {
     fetchStats()
-    const iv = setInterval(fetchStats, 30000)
-    return () => clearInterval(iv)
-  }, [fetchStats])
+    fetchHealth()
+    const iv1 = setInterval(fetchStats,  30000)
+    const iv2 = setInterval(fetchHealth, 60000)
+    return () => { clearInterval(iv1); clearInterval(iv2) }
+  }, [fetchStats, fetchHealth])
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
@@ -822,7 +858,7 @@ export default function Dashboard() {
       {/* ── Threat gauge + System health + Pie ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ThreatGauge stats={stats} />
-        <SystemHealth stats={stats} />
+        <SystemHealth stats={stats} health={health} />
         <SeverityPieChart data={stats?.alerts_by_severity || {}} />
       </div>
 

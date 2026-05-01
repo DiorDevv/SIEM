@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 const api = (path, opts = {}) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token')
   return fetch(path, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
@@ -271,6 +271,138 @@ function IOCModal({ onClose, onSaved }) {
   )
 }
 
+// ── Feed Import Modal ──────────────────────────────────────────────────────────
+function FeedImportModal({ onClose, onDone }) {
+  const [file, setFile]         = useState(null)
+  const [iocType, setIocType]   = useState('ip')
+  const [severity, setSeverity] = useState('MEDIUM')
+  const [source, setSource]     = useState('feed')
+  const [tags, setTags]         = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [result, setResult]     = useState(null)
+  const [err, setErr]           = useState('')
+  const fileRef = React.useRef()
+
+  const submit = async () => {
+    if (!file) { setErr('Please select a file'); return }
+    setLoading(true); setErr('')
+    try {
+      const token = localStorage.getItem('access_token')
+      const fd = new FormData()
+      fd.append('file', file)
+      const params = new URLSearchParams({ ioc_type: iocType, severity, source })
+      if (tags.trim()) params.set('tags', tags.trim())
+      const resp = await fetch(`/api/threat-intel/import-feed?${params}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      })
+      if (!resp.ok) {
+        const e = await resp.json()
+        throw new Error(e.detail || 'Import failed')
+      }
+      const data = await resp.json()
+      setResult(data)
+    } catch (e) { setErr(e.message || String(e)) }
+    finally { setLoading(false) }
+  }
+
+  const ovl = { position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }
+  const box = { background: 'var(--bg-card, #1e293b)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: 14, padding: 28, width: '100%', maxWidth: 500, color: 'var(--text)', boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }
+  const inp = { background: 'var(--bg-secondary, #0f172a)', border: '1px solid var(--border, rgba(255,255,255,0.1))', color: 'var(--text)', borderRadius: 6, padding: '8px 10px', fontSize: 13, width: '100%', boxSizing: 'border-box' }
+  const lbl = { fontSize: 12, color: 'var(--text-muted, #94a3b8)', marginBottom: 4, display: 'block' }
+
+  return (
+    <div style={ovl}>
+      <div style={box}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>Import Feed</h3>
+            <div style={{ fontSize: 12, color: 'var(--text-muted, #94a3b8)', marginTop: 2 }}>
+              Upload a plain-text file — one IOC per line
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
+        </div>
+
+        {result ? (
+          <div>
+            <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
+              <div style={{ color: '#10b981', fontWeight: 700, fontSize: 14, marginBottom: 6 }}>✓ Import Complete</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
+                {[
+                  { label: 'Imported', val: result.imported, color: '#10b981' },
+                  { label: 'Skipped',  val: result.skipped,  color: '#f59e0b' },
+                  { label: 'Failed',   val: result.failed,   color: '#ef4444' },
+                ].map(({ label, val, color }) => (
+                  <div key={label} style={{ textAlign: 'center', background: 'var(--bg-secondary, #0f172a)', borderRadius: 8, padding: '10px 0' }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color }}>{val ?? 0}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button onClick={onDone} style={{ width: '100%', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              Close &amp; Refresh
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={lbl}>File (plain text, one IOC per line)</label>
+              <div
+                onClick={() => fileRef.current?.click()}
+                style={{ border: `2px dashed ${file ? '#6366f1' : 'var(--border, rgba(255,255,255,0.12))'}`, borderRadius: 8, padding: '20px', textAlign: 'center', cursor: 'pointer', background: file ? 'rgba(99,102,241,0.07)' : 'var(--bg-secondary, #0f172a)', transition: 'border-color .2s' }}
+              >
+                <input ref={fileRef} type="file" accept=".txt,.csv,.ioc" style={{ display: 'none' }}
+                  onChange={e => setFile(e.target.files[0])} />
+                {file
+                  ? <span style={{ color: '#6366f1', fontWeight: 600, fontSize: 13 }}>📄 {file.name}</span>
+                  : <span style={{ color: '#94a3b8', fontSize: 13 }}>Click to browse or drag a .txt / .csv file</span>}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={lbl}>IOC Type</label>
+                <select value={iocType} onChange={e => setIocType(e.target.value)} style={inp}>
+                  {['ip','domain','url','sha256','sha1','md5','email'].map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Severity</label>
+                <select value={severity} onChange={e => setSeverity(e.target.value)} style={inp}>
+                  {['LOW','MEDIUM','HIGH','CRITICAL'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Source</label>
+                <input value={source} onChange={e => setSource(e.target.value)} style={inp} placeholder="feed" />
+              </div>
+              <div>
+                <label style={lbl}>Tags (comma-separated)</label>
+                <input value={tags} onChange={e => setTags(e.target.value)} style={inp} placeholder="apt29, ransomware" />
+              </div>
+            </div>
+
+            {err && <div style={{ color: '#f87171', fontSize: 12, background: 'rgba(239,68,68,0.1)', borderRadius: 6, padding: '8px 12px' }}>{err}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+              <button onClick={onClose} style={{ flex: 1, background: 'var(--bg-secondary, #0f172a)', border: '1px solid var(--border, rgba(255,255,255,0.1))', color: '#94a3b8', borderRadius: 8, padding: '10px 0', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+                Cancel
+              </button>
+              <button onClick={submit} disabled={loading || !file}
+                style={{ flex: 2, background: loading ? 'rgba(99,102,241,0.5)' : '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 0', cursor: loading || !file ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13 }}>
+                {loading ? '⟳ Importing…' : '⬆ Import Feed'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ThreatIntel() {
   const { user } = useAuth()
@@ -278,9 +410,10 @@ export default function ThreatIntel() {
   const [iocs, setIocs] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [scanLoading, setScanLoading] = useState(false)
-  const [scanResult, setScanResult] = useState(null)
+  const [showModal, setShowModal]       = useState(false)
+  const [showFeedModal, setShowFeedModal] = useState(false)
+  const [scanLoading, setScanLoading]   = useState(false)
+  const [scanResult, setScanResult]     = useState(null)
 
   // Filters
   const [search, setSearch] = useState('')
@@ -339,6 +472,12 @@ export default function ThreatIntel() {
             style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, opacity: scanLoading ? 0.6 : 1 }}
           >
             {scanLoading ? '⟳ Scanning…' : '⟳ Scan Alerts'}
+          </button>
+          <button
+            onClick={() => setShowFeedModal(true)}
+            style={{ background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.35)', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}
+          >
+            ⬆ Import Feed
           </button>
           <button
             onClick={() => setShowModal(true)}
@@ -482,6 +621,7 @@ export default function ThreatIntel() {
       </div>
 
       {showModal && <IOCModal onClose={() => setShowModal(false)} onSaved={loadData} />}
+      {showFeedModal && <FeedImportModal onClose={() => setShowFeedModal(false)} onDone={() => { setShowFeedModal(false); loadData() }} />}
     </div>
   )
 }

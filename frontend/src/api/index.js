@@ -143,6 +143,9 @@ export const totpDisable          = (password, code) => api.delete('/api/auth/to
 export const totpRegenerateCodes  = (code)       => api.post('/api/auth/totp/backup-codes/regenerate', { code })
 export const totpBackupCodesCount = ()           => api.get('/api/auth/totp/backup-codes/count')
 
+// Health check
+export const getSystemHealth    = ()     => api.get('/api/health')
+
 // System Config (admin)
 export const getSystemConfig    = ()     => api.get('/api/system/config')
 export const updateSystemConfig = (data) => api.put('/api/system/config', data)
