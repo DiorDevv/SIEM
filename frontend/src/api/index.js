@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -65,22 +65,29 @@ export const getAgent = (id) => api.get(`/api/agents/${id}`)
 export const deleteAgent = (id) => api.delete(`/api/agents/${id}`)
 
 // Alerts
-export const getAlerts = (params) => api.get('/api/alerts', { params })
-export const getAlert = (id) => api.get(`/api/alerts/${id}`)
-export const acknowledgeAlert = (id) => api.put(`/api/alerts/${id}/acknowledge`)
-export const resolveAlert = (id) => api.put(`/api/alerts/${id}/resolve`)
-export const updateAlertStatus = (id, status) => {
-  if (status === 'resolved') return resolveAlert(id)
-  if (status === 'investigating') return acknowledgeAlert(id)
-  return api.put(`/api/alerts/${id}/status`, { status })
-}
-export const deleteAlert = (id) => api.delete(`/api/alerts/${id}`)
+export const getAlerts       = (params)       => api.get('/api/alerts', { params })
+export const getAlert        = (id)           => api.get(`/api/alerts/${id}`)
+export const updateAlertStatus = (id, status, note) =>
+  api.put(`/api/alerts/${id}/status`, { status, note })
+export const assignAlert     = (id, userId)   => api.put(`/api/alerts/${id}/assign`, { user_id: userId })
+export const deleteAlert     = (id)           => api.delete(`/api/alerts/${id}`)
+export const getAlertNotes   = (id)           => api.get(`/api/alerts/${id}/notes`)
+export const addAlertNote    = (id, body)     => api.post(`/api/alerts/${id}/notes`, { body })
+export const bulkAlertAction = (data)         => api.post('/api/alerts/bulk-action', data)
+export const getAlertStats   = (days = 7)     => api.get('/api/alerts/stats/summary', { params: { days } })
+// backward compat
+export const acknowledgeAlert = (id) => updateAlertStatus(id, 'acknowledged')
+export const resolveAlert     = (id) => updateAlertStatus(id, 'resolved')
 export const bulkAcknowledgeAlerts = (ids) =>
-  api.post('/api/alerts/bulk-acknowledge', { alert_ids: ids })
+  bulkAlertAction({ alert_ids: ids, action: 'acknowledge' })
 
 // Logs
-export const getLogs = (params) => api.get('/api/logs', { params })
-export const getEventTypes = () => api.get('/api/logs/event-types')
+export const getLogs        = (params) => api.get('/api/logs',             { params })
+export const getEventTypes  = ()       => api.get('/api/logs/event-types')
+export const getLogSources  = ()       => api.get('/api/logs/sources')
+export const getLogStats    = (hours)  => api.get('/api/logs/stats',        { params: { hours } })
+export const getLogTimeline = (hours)  => api.get('/api/logs/timeline',     { params: { hours } })
+export const exportLogsCSV  = (params) => api.get('/api/logs/export/csv',   { params, responseType: 'blob' })
 
 // Rules
 export const getRules = () => api.get('/api/rules')
@@ -89,12 +96,19 @@ export const updateRule = (id, data) => api.put(`/api/rules/${id}`, data)
 export const deleteRule = (id) => api.delete(`/api/rules/${id}`)
 
 // Active Response
-export const getARPolicies   = ()         => api.get('/api/ar/policies')
-export const createARPolicy  = (data)     => api.post('/api/ar/policies', data)
-export const updateARPolicy  = (id, data) => api.put(`/api/ar/policies/${id}`, data)
-export const deleteARPolicy  = (id)       => api.delete(`/api/ar/policies/${id}`)
-export const getARExecutions = (params)   => api.get('/api/ar/executions', { params })
-export const triggerAR       = (data)     => api.post('/api/ar/trigger', data)
+export const getARPolicies       = (params)    => api.get('/api/ar/policies', { params })
+export const createARPolicy      = (data)      => api.post('/api/ar/policies', data)
+export const updateARPolicy      = (id, data)  => api.put(`/api/ar/policies/${id}`, data)
+export const deleteARPolicy      = (id)        => api.delete(`/api/ar/policies/${id}`)
+export const cloneARPolicy       = (id)        => api.post(`/api/ar/policies/${id}/clone`)
+export const bulkToggleARPolicies= (data)      => api.post('/api/ar/policies/bulk-toggle', data)
+export const getARExecutions     = (params)    => api.get('/api/ar/executions', { params })
+export const getARExecution      = (id)        => api.get(`/api/ar/executions/${id}`)
+export const cancelARExecution   = (id)        => api.delete(`/api/ar/executions/${id}`)
+export const retryARExecution    = (id)        => api.post(`/api/ar/executions/${id}/retry`)
+export const triggerAR           = (data)      => api.post('/api/ar/trigger', data)
+export const getARStats          = ()          => api.get('/api/ar/stats')
+export const getARTemplates      = ()          => api.get('/api/ar/templates')
 
 // Vulnerabilities
 export const getVulns         = (params)       => api.get('/api/vulns', { params })
@@ -137,5 +151,27 @@ export const getAuditdScript    = ()     => `${API_BASE}/api/system/auditd-scrip
 export const exportAlertsCSV  = (params) => api.get('/api/reports/alerts/csv',  { params, responseType: 'blob' })
 export const exportAlertsJSON = (params) => api.get('/api/reports/alerts/json', { params, responseType: 'blob' })
 export const getReportSummary = (days)   => api.get('/api/reports/summary', { params: { days } })
+
+// Inventory
+export const getInventoryAgents     = ()              => api.get('/api/inventory/agents')
+export const getInventorySummary    = (agentId)       => api.get(`/api/inventory/${agentId}`)
+export const getInventoryPackages   = (agentId, p)    => api.get(`/api/inventory/${agentId}/packages`,  { params: p })
+export const getInventoryPorts      = (agentId, p)    => api.get(`/api/inventory/${agentId}/ports`,     { params: p })
+export const getInventoryProcesses  = (agentId, p)    => api.get(`/api/inventory/${agentId}/processes`, { params: p })
+export const getInventoryInterfaces = (agentId)       => api.get(`/api/inventory/${agentId}/interfaces`)
+
+// Case Management
+export const getCaseStats       = ()              => api.get('/api/cases/stats')
+export const getCases           = (params)        => api.get('/api/cases', { params })
+export const getCase            = (id)            => api.get(`/api/cases/${id}`)
+export const createCase         = (data)          => api.post('/api/cases', data)
+export const updateCase         = (id, data)      => api.put(`/api/cases/${id}`, data)
+export const deleteCaseById     = (id)            => api.delete(`/api/cases/${id}`)
+export const changeCaseStatus   = (id, status, note) => api.post(`/api/cases/${id}/status`, { status, note })
+export const assignCase         = (id, userId, userName) => api.post(`/api/cases/${id}/assign`, { user_id: userId, user_name: userName })
+export const addCaseNote        = (id, data)      => api.post(`/api/cases/${id}/notes`, data)
+export const deleteCaseNote     = (caseId, noteId) => api.delete(`/api/cases/${caseId}/notes/${noteId}`)
+export const linkCaseAlert      = (caseId, alertId) => api.post(`/api/cases/${caseId}/alerts/${alertId}`)
+export const unlinkCaseAlert    = (caseId, alertId) => api.delete(`/api/cases/${caseId}/alerts/${alertId}`)
 
 export default api
