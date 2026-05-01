@@ -36,8 +36,7 @@ function ProtectedLayout({ children }) {
 
   const addToast = useCallback((message, type = 'info') => {
     const id = Date.now()
-    setToasts((prev) => [...prev.slice(-4), { id, message, type }])
-    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 5000)
+    setToasts((prev) => [...prev.slice(-19), { id, message, type, time: id, read: false }])
   }, [])
 
   useEffect(() => {
@@ -91,40 +90,15 @@ function ProtectedLayout({ children }) {
           wsConnected={wsConnected}
           unackCount={unackCount}
           onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
+          notifications={toasts}
+          onClearAll={() => setToasts([])}
+          onDismiss={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))}
         />
         <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>
       </div>
 
-      {/* Toast notifications */}
-      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2">
-        {toasts.map((toast) => {
-          const styles = {
-            alert:    { bg: 'rgba(239,68,68,0.95)',  icon: '🚨' },
-            critical: { bg: 'rgba(239,68,68,0.95)',  icon: '🔴' },
-            warning:  { bg: 'rgba(245,158,11,0.95)', icon: '⚠️' },
-            info:     { bg: 'rgba(22,29,46,0.97)',   icon: '🔔' },
-          }
-          const s = styles[toast.type] || styles.info
-          return (
-            <div
-              key={toast.id}
-              className="flex items-start gap-2 px-4 py-3 rounded-xl text-sm font-medium animate-fade-in"
-              style={{
-                background: s.bg,
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: '#fff',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                maxWidth: 340,
-              }}
-            >
-              <span className="flex-shrink-0">{s.icon}</span>
-              <span>{toast.message}</span>
-            </div>
-          )
-        })}
-      </div>
     </div>
   )
 }
