@@ -118,28 +118,20 @@ export default function AuditLog() {
 
   const loadStats = useCallback(async () => {
     try {
-      const r = await import('../api').then(m => m.default?.get
-        ? null
-        : fetch(`/api/audit/stats?days=${filters.days}`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-          }).then(res => res.json()))
-      if (r) setStats(r)
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+      const r = await fetch(`/api/audit/stats?days=${filters.days}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (r.ok) setStats(await r.json())
     } catch {}
   }, [filters.days])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => {
     getAuditActions().then(r => setActions(r.data)).catch(() => {})
   }, [])
-
-  // Load stats via the API
-  useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) return
-    fetch(`/api/audit/stats?days=${filters.days}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    }).then(r => r.json()).then(setStats).catch(() => {})
-  }, [filters.days])
 
   const handleExport = async () => {
     try {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 
 const api = (path, opts = {}) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token')
   return fetch(path, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...opts.headers },
     ...opts,

@@ -1289,7 +1289,7 @@ function NotificationsTab({ t }) {
   const [form, setForm]           = useState({ name: '', type: 'email', config: {}, enabled: true, min_severity: 'HIGH' })
   const [error, setError]         = useState('')
 
-  const token = () => localStorage.getItem('token')
+  const token = () => localStorage.getItem('access_token')
   const authH = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' })
 
   const load = async () => {

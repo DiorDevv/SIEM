@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext'
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 const api = (path, opts = {}) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token')
   return fetch(path, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
@@ -639,7 +639,7 @@ export default function Cases() {
   useEffect(() => {
     loadCases()
     loadStats()
-    api('/api/users').then(d => setUsers(d?.users || [])).catch(() => {})
+    api('/api/users').then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {})
   }, [loadCases, loadStats])
 
   const totalPages = Math.max(1, Math.ceil(total / SIZE))

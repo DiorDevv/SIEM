@@ -57,15 +57,14 @@ def _gen_backup_codes() -> tuple[list[str], list[str]]:
 
 def _verify_backup(code: str, hashes: list[str]) -> tuple[bool, list[str]]:
     """Try to match code against stored hashes. Returns (matched, remaining_hashes)."""
-    code = code.replace("-", "").strip().lower()
+    code_clean  = code.strip().lower()
+    code_nodash = code_clean.replace("-", "")
     for i, h in enumerate(hashes):
         try:
-            check = code + "-" + code  # normalise dashed form
+            if _backup_ctx.verify(code_clean, h) or _backup_ctx.verify(code_nodash, h):
+                return True, [x for j, x in enumerate(hashes) if j != i]
         except Exception:
-            pass
-        plain = code if "-" not in code else code
-        if _backup_ctx.verify(code, h) or _backup_ctx.verify(plain, h):
-            return True, [x for j, x in enumerate(hashes) if j != i]
+            continue
     return False, hashes
 
 
