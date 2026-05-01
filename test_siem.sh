@@ -45,14 +45,14 @@ echo "╚═══════════════════════�
 section "1. System Health"
 HEALTH=$(curl -sf "$BASE/api/health" 2>/dev/null)
 if [ -n "$HEALTH" ]; then
-  STATUS=$(jq_val "$HEALTH" "d['status']")
-  DB=$(jq_val "$HEALTH" "d['checks']['database']")
-  ES=$(jq_val "$HEALTH" "d['checks']['elasticsearch']")
-  REDIS=$(jq_val "$HEALTH" "d['checks']['redis']")
-  [ "$STATUS" = "ok" ] && ok "Overall health: OK" || warn "Overall health: $STATUS"
-  [ "$DB" = "ok" ]     && ok "PostgreSQL: OK"     || fail "PostgreSQL: $DB"
-  [ "$ES" != "None" ] && [[ "$ES" == *"ok"* || "$ES" == "green" || "$ES" == "yellow" ]] && ok "Elasticsearch: $ES" || warn "Elasticsearch: ${ES:-unreachable}"
-  [ "$REDIS" = "ok" ]  && ok "Redis: OK"           || warn "Redis: ${REDIS:-unreachable}"
+  STATUS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null)
+  DB=$(echo "$HEALTH"    | python3 -c "import sys,json; print(json.load(sys.stdin)['checks'].get('database','?'))" 2>/dev/null)
+  ES=$(echo "$HEALTH"    | python3 -c "import sys,json; print(json.load(sys.stdin)['checks'].get('elasticsearch','?'))" 2>/dev/null)
+  REDIS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['checks'].get('redis','?'))" 2>/dev/null)
+  [ "$STATUS" = "ok" ] && ok "Overall status: healthy" || warn "Overall health: $STATUS"
+  [ "$DB" = "ok" ]     && ok "PostgreSQL: OK"          || fail "PostgreSQL: $DB"
+  [[ "$ES" == "ok" || "$ES" == "green" || "$ES" == "yellow" ]] && ok "Elasticsearch: $ES" || warn "Elasticsearch: ${ES:-unreachable}"
+  [ "$REDIS" = "ok" ]  && ok "Redis: OK"               || warn "Redis: ${REDIS:-unreachable}"
 else
   fail "Health endpoint unreachable — docker compose ps qilib tekshiring"
   exit 1
@@ -113,8 +113,8 @@ send_logs() {
   local r=$(curl -sf -X POST "$BASE/api/logs/ingest" \
     -H "Content-Type: application/json" \
     -d "{\"agent_id\":\"$AGENT_ID\",\"logs\":$logs}" 2>/dev/null)
-  local ingested=$(jq_val "$r" "d.get('ingested',0)")
-  [ -n "$r" ] && ok "$label (ingested=${ingested:-?})" || fail "$label"
+  local ingested=$(jq_val "$r" "d.get('count', d.get('ingested', '?'))")
+  [ -n "$r" ] && ok "$label (count=${ingested:-?})" || fail "$label"
 }
 
 send_logs "SSH Brute Force (7 attempts)" '[
@@ -211,20 +211,23 @@ ALERT_LIST=$(jq_val "$ALERTS" "len(d.get('alerts',[]))")
 ASTATS=$(get "/api/alerts/stats/summary?days=1")
 [ -n "$ASTATS" ] && ok "Alert stats OK" || warn "Alert stats endpoint failed"
 
-# Get first alert ID for further tests
-FIRST_ALERT=$(jq_val "$ALERTS" "d.get('alerts',[])[0].get('id') if d.get('alerts',[]) else None")
-if [ -n "$FIRST_ALERT" ] && [ "$FIRST_ALERT" != "None" ]; then
-  ok "First alert ID: $FIRST_ALERT"
+# Pick an open alert for status update test
+OPEN_ALERT=$(get "/api/alerts?status=open&size=5" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+alerts=[a for a in d.get('alerts',[]) if str(a.get('status','')).split('.')[-1]=='open']
+print(alerts[0]['id'] if alerts else '')
+" 2>/dev/null)
+if [ -n "$OPEN_ALERT" ]; then
+  ok "Found open alert: id=$OPEN_ALERT"
 
-  # Update status
-  UPD=$(put "/api/alerts/$FIRST_ALERT/status" '{"status":"investigating","note":"Auto-test investigation"}')
+  UPD=$(put "/api/alerts/$OPEN_ALERT/status" '{"status":"investigating","note":"Auto-test investigation"}')
   [ -n "$UPD" ] && ok "Alert status → investigating" || warn "Alert status update failed"
 
-  # Add note
-  NOTE=$(post "/api/alerts/$FIRST_ALERT/notes" '{"body":"Test note from automated test suite"}')
+  NOTE=$(post "/api/alerts/$OPEN_ALERT/notes" '{"body":"Test note from automated test suite"}')
   [ -n "$NOTE" ] && ok "Alert note added" || warn "Alert note add failed"
 else
-  warn "No alerts to test status/note on"
+  warn "No open alerts to test status/note on (all may be acknowledged)"
 fi
 
 # ── 6. Dashboard ─────────────────────────────────────────────────────────────
@@ -265,9 +268,9 @@ if [ -n "$NEW_RULE_ID" ] && [ "$NEW_RULE_ID" != "None" ]; then
       "Process started: /usr/local/bin/minerd -a sha256d"
     ]
   }')
-  MATCHED=$(jq_val "$TEST_R" "d.get('matched',0)")
-  TOTAL_T=$(jq_val "$TEST_R" "d.get('total',0)")
-  [ "$MATCHED" = "2" ] && ok "Rule test: $MATCHED/$TOTAL_T matched (expected 2/3)" || warn "Rule test: $MATCHED/$TOTAL_T matched"
+  MATCHED=$(echo "$TEST_R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('matched',0))" 2>/dev/null)
+  TOTAL_T=$(echo "$TEST_R"  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total',0))"   2>/dev/null)
+  [ "$MATCHED" = "2" ] && ok "Rule test: $MATCHED/$TOTAL_T matched (correct)" || warn "Rule test: $MATCHED/$TOTAL_T matched (expected 2)"
 
   # Delete test rule
   del "/api/rules/$NEW_RULE_ID" > /dev/null
@@ -402,7 +405,7 @@ NEW_AR=$(post "/api/ar/policies" '{
   "name":"[TEST] Block suspicious IP",
   "description":"Auto-block IPs with 5+ brute force attempts",
   "enabled":false,
-  "trigger_on":"alert",
+  "trigger_on":"any_alert",
   "severity_threshold":"HIGH",
   "action":"block_ip",
   "action_params":{"duration":3600}
@@ -460,18 +463,20 @@ WS_CHECK=$(curl -sf --max-time 2 -o /dev/null -w "%{http_code}" \
 
 # ── 20. Rate Limiting ────────────────────────────────────────────────────────
 section "20. Rate Limiting"
-RATE_HIT=""
-for i in $(seq 1 65); do
+# Use a dedicated test agent ID to get a fresh bucket
+RL_AGENT="rate-limit-test-$(date +%s)"
+RATE_HIT=""; RATE_AT=0
+for i in $(seq 1 70); do
   R=$(curl -sf -X POST "$BASE/api/logs/ingest" \
     -H "Content-Type: application/json" \
-    -d "{\"agent_id\":\"$AGENT_ID\",\"logs\":[{\"message\":\"rate limit test $i\",\"source\":\"test\"}]}" \
+    -d "{\"agent_id\":\"$RL_AGENT\",\"logs\":[{\"message\":\"rl test $i\",\"source\":\"test\"}]}" \
     -w "%{http_code}" -o /dev/null 2>/dev/null)
   if [ "$R" = "429" ]; then
-    RATE_HIT="yes"
+    RATE_HIT="yes"; RATE_AT=$i
     break
   fi
 done
-[ "$RATE_HIT" = "yes" ] && ok "Rate limiter triggered at attempt ~$i (429 Too Many Requests)" || warn "Rate limiter not triggered after 65 requests"
+[ "$RATE_HIT" = "yes" ] && ok "Rate limiter triggered at request #$RATE_AT (429 Too Many Requests)" || warn "Rate limiter not triggered after 70 requests (check INGEST_LIMIT in logs.py)"
 
 # ── Final Results ────────────────────────────────────────────────────────────
 echo ""

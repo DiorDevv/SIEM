@@ -179,7 +179,7 @@ async def create_ioc(
         tags=body.tags,
         malware_family=body.malware_family,
         expires_at=expires_at,
-        created_by=user.get("username"),
+        created_by=user.username if hasattr(user, 'username') else str(user),
     )
     db.add(ioc)
     await db.flush()
@@ -394,7 +394,7 @@ async def import_feed(
         source=source,
         severity=severity,
         tags=tag_list,
-        created_by=user.get("username", "admin"),
+        created_by=user.username if hasattr(user, 'username') else "admin",
     )
     return result
 

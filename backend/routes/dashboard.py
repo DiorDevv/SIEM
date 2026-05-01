@@ -174,15 +174,16 @@ async def get_dashboard_stats(
             .order_by(Alert.created_at.desc())
             .limit(1)
         )).scalar_one_or_none()
-        country = (ti or {}).get("country_code")
+        ti_dict  = ti if isinstance(ti, dict) else {}
+        country = ti_dict.get("country_code")
         top_attackers.append({
             "src_ip":      ip,
             "count":       count,
             "country":     country,
             "flag":        _FLAGS.get(country or "", "🌐"),
-            "abuse_score": (ti or {}).get("abuse_score"),
-            "is_tor":      (ti or {}).get("is_tor", False),
-            "isp":         (ti or {}).get("isp"),
+            "abuse_score": ti_dict.get("abuse_score"),
+            "is_tor":      ti_dict.get("is_tor", False),
+            "isp":         ti_dict.get("isp"),
         })
 
     # ── 10. Geo distribution ──────────────────────────────────────────────────
