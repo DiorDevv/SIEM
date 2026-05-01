@@ -64,6 +64,22 @@ EVENT_TYPE_MAP = {
     'SYSCALL':             'system_call',
 }
 
+# MITRE ATT&CK technique per audit event type
+MITRE_MAP = {
+    'USER_AUTH':           'T1078',      # Valid Accounts
+    'USER_LOGIN':          'T1078',      # Valid Accounts
+    'ANOM_LOGIN_FAILURES': 'T1110',      # Brute Force
+    'ADD_USER':            'T1136.001',  # Create Account: Local Account
+    'DEL_USER':            'T1531',      # Account Access Removal
+    'USER_CMD':            'T1548.003',  # Abuse Elevation: Sudo
+    'ANOM_PROMISCUOUS':    'T1040',      # Network Sniffing
+    'KERN_MODULE':         'T1215',      # Kernel Modules and Extensions
+    'EXECVE':              'T1059',      # Command and Scripting Interpreter
+    'AVC':                 'T1068',      # Exploitation for Privilege Escalation
+    'SELINUX_ERR':         'T1068',      # Exploitation for Privilege Escalation
+    'CRYPTO_KEY_USER':     'T1552',      # Unsecured Credentials
+}
+
 
 def _load_pos() -> int:
     try:
@@ -132,12 +148,15 @@ def _parse_audit_line(line: str) -> Dict[str, Any]:
 
     message = " ".join(parts)
 
+    mitre = MITRE_MAP.get(audit_type, '')
     parsed = {
         "event_type":   event_type,
         "audit_type":   audit_type,
         "decoder":      "auditd",
         **kv,
     }
+    if mitre:
+        parsed["mitre_technique"] = mitre
 
     return {
         "timestamp":     ts,

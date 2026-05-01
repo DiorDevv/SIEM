@@ -15,6 +15,7 @@ from database import init_db, AsyncSessionLocal
 from models.agent import Agent, AgentStatus
 from models.user import User, UserRole
 from models.rule import Rule, RuleSeverity
+from models.active_response import ARPolicy, ARActionType, ARTriggerOn
 from routes.auth import hash_password
 from routes.auth import router as auth_router
 from routes.agents import router as agents_router
@@ -31,6 +32,11 @@ from routes.audit            import router as audit_router
 from routes.installer        import router as installer_router
 from routes.totp             import router as totp_router
 from routes.system_config    import router as system_config_router
+from routes.inventory        import router as inventory_router
+from routes.notifications    import router as notifications_router
+from routes.cases            import router as cases_router
+from routes.threat_intel     import router as threat_intel_router
+from routes.correlation      import router as correlation_router
 from services.elasticsearch_service import setup_index_template, get_es_client
 from services.websocket_manager import ws_manager
 from services.notification_service import notify_agent_offline
@@ -370,6 +376,157 @@ DEFAULT_RULES = [
         "mitre_tactic": "Credential Access",
         "mitre_technique": "T1110.001",
     },
+    # ── User Enumeration (built-in) ───────────────────────────────────────────
+    {
+        "name": "SSH User Enumeration",
+        "description": "10+ invalid user attempts from same IP in 120s",
+        "pattern": None,
+        "severity": RuleSeverity.HIGH,
+        "level": 11,
+        "category": "reconnaissance",
+        "groups": "ssh,reconnaissance,scanning",
+        "cooldown_seconds": 600,
+        "custom_logic": "user_enumeration",
+        "mitre_tactic": "Reconnaissance",
+        "mitre_technique": "T1592.001",
+    },
+    # ── Password Spray (built-in) ─────────────────────────────────────────────
+    {
+        "name": "Password Spray Attack",
+        "description": "20+ auth failures from same IP in 300s (possible password spray)",
+        "pattern": None,
+        "severity": RuleSeverity.HIGH,
+        "level": 12,
+        "category": "attack",
+        "groups": "authentication,brute_force,spray",
+        "cooldown_seconds": 900,
+        "custom_logic": "password_spray",
+        "mitre_tactic": "Credential Access",
+        "mitre_technique": "T1110.003",
+    },
+    # ── Root Login via SSH (built-in) ─────────────────────────────────────────
+    {
+        "name": "Root Login via SSH",
+        "description": "Direct root login via SSH — should be disabled on hardened systems",
+        "pattern": None,
+        "severity": RuleSeverity.CRITICAL,
+        "level": 14,
+        "category": "authentication",
+        "groups": "ssh,privilege_escalation,authentication",
+        "cooldown_seconds": 300,
+        "custom_logic": "root_login_ssh",
+        "mitre_tactic": "Privilege Escalation",
+        "mitre_technique": "T1078.003",
+    },
+    # ── AppArmor Denial ───────────────────────────────────────────────────────
+    {
+        "name": "AppArmor Access Denied",
+        "description": "Process blocked by AppArmor mandatory access control",
+        "pattern": r'apparmor="DENIED"',
+        "severity": RuleSeverity.MEDIUM,
+        "level": 7,
+        "category": "integrity",
+        "groups": "apparmor,integrity,access_control",
+        "cooldown_seconds": 120,
+        "mitre_tactic": "Defense Evasion",
+        "mitre_technique": "T1562.001",
+    },
+    # ── Rootkit Detection ─────────────────────────────────────────────────────
+    {
+        "name": "Rootkit Indicator Detected",
+        "description": "Rootcheck detected a rootkit, hidden process, or kernel module",
+        "pattern": r"ROOTCHECK \[(?:ROOTKIT_FILE|HIDDEN_PROCESS|HIDDEN_FILE|KERNEL_MODULE)\]",
+        "severity": RuleSeverity.CRITICAL,
+        "level": 15,
+        "category": "rootcheck",
+        "groups": "rootcheck,malware,integrity",
+        "cooldown_seconds": 60,
+        "mitre_tactic": "Defense Evasion",
+        "mitre_technique": "T1014",
+    },
+    # ── USB Connected ─────────────────────────────────────────────────────────
+    {
+        "name": "USB Device Connected",
+        "description": "New USB storage device connected to the system",
+        "pattern": r"new (?:high|full|low|super)-speed USB device|New USB device found",
+        "severity": RuleSeverity.LOW,
+        "level": 5,
+        "category": "hardware",
+        "groups": "usb,hardware,exfiltration",
+        "cooldown_seconds": 60,
+        "mitre_tactic": "Exfiltration",
+        "mitre_technique": "T1052.001",
+    },
+    # ── OOM Kill ──────────────────────────────────────────────────────────────
+    {
+        "name": "Out of Memory — Process Killed",
+        "description": "Kernel OOM killer terminated a process due to memory exhaustion",
+        "pattern": r"Out of memory: Kill process|oom_kill_process|memory cgroup out of memory",
+        "severity": RuleSeverity.HIGH,
+        "level": 10,
+        "category": "availability",
+        "groups": "kernel,oom,availability",
+        "cooldown_seconds": 300,
+        "mitre_tactic": "Impact",
+        "mitre_technique": "T1499",
+    },
+    # ── Kernel Panic ──────────────────────────────────────────────────────────
+    {
+        "name": "Kernel Panic Detected",
+        "description": "Kernel panic or BUG detected — system instability",
+        "pattern": r"Kernel panic|BUG:|kernel BUG at|OOPS",
+        "severity": RuleSeverity.CRITICAL,
+        "level": 15,
+        "category": "availability",
+        "groups": "kernel,panic,availability",
+        "cooldown_seconds": 60,
+        "mitre_tactic": "Impact",
+        "mitre_technique": "T1499",
+    },
+    # ── FIM: Critical System Files ────────────────────────────────────────────
+    {
+        "name": "Critical System File Modified",
+        "description": "A critical system file was modified (passwd, sudoers, crontab, etc.)",
+        "pattern": r"FIM \[(?:MODIFIED|CREATED|DELETED)\].*/(?:etc/passwd|etc/shadow|etc/sudoers|etc/crontab|etc/ssh/|root/\.ssh/)",
+        "severity": RuleSeverity.CRITICAL,
+        "level": 14,
+        "category": "fim",
+        "groups": "fim,integrity,persistence",
+        "cooldown_seconds": 60,
+        "mitre_tactic": "Persistence",
+        "mitre_technique": "T1098",
+    },
+]
+
+
+DEFAULT_AR_POLICIES = [
+    {
+        "name":             "Block SSH Brute Force",
+        "description":      "Auto-block source IP when SSH brute force rule fires",
+        "trigger_on":       ARTriggerOn.rule_name,
+        "trigger_rule":     "Brute Force SSH Attack",
+        "action":           ARActionType.block_ip,
+        "action_params":    {"unblock_after": 3600},
+        "cooldown_seconds": 600,
+    },
+    {
+        "name":             "Block Password Spray",
+        "description":      "Auto-block IP performing password spray attacks",
+        "trigger_on":       ARTriggerOn.rule_name,
+        "trigger_rule":     "Password Spray Attack",
+        "action":           ARActionType.block_ip,
+        "action_params":    {"unblock_after": 7200},
+        "cooldown_seconds": 900,
+    },
+    {
+        "name":             "Email — CRITICAL Alerts",
+        "description":      "Send email notification on CRITICAL severity alerts",
+        "trigger_on":       ARTriggerOn.severity,
+        "trigger_severity": "CRITICAL",
+        "action":           ARActionType.email_alert,
+        "action_params":    {"recipients": settings.DEFAULT_ADMIN_EMAIL},
+        "cooldown_seconds": 300,
+    },
 ]
 
 
@@ -423,6 +580,49 @@ async def seed_defaults():
             await db.rollback()
             logger.warning(f"Rules seed error: {e}")
 
+        try:
+            for ar_data in DEFAULT_AR_POLICIES:
+                stmt = select(ARPolicy).where(ARPolicy.name == ar_data["name"])
+                if not (await db.execute(stmt)).scalar_one_or_none():
+                    db.add(ARPolicy(**ar_data))
+            await db.commit()
+            logger.info("Default AR policies seeded")
+        except Exception as e:
+            await db.rollback()
+            logger.warning(f"AR policies seed error: {e}")
+
+
+async def ar_timeout_checker():
+    """Background task: mark stuck 'sent' executions as 'timeout', process auto-unblocks."""
+    from engine.active_response import mark_timed_out_executions, process_auto_unblocks
+    while True:
+        await asyncio.sleep(120)   # every 2 minutes
+        try:
+            async with AsyncSessionLocal() as db:
+                timed_out = await mark_timed_out_executions(db)
+                unblocks   = await process_auto_unblocks(db)
+                await db.commit()
+                if timed_out:
+                    logger.info(f"AR timeout checker: marked {timed_out} execution(s) as timeout")
+                if unblocks:
+                    logger.info(f"AR timeout checker: scheduled {unblocks} auto-unblock(s)")
+        except Exception as e:
+            logger.error(f"AR timeout checker error: {e}")
+
+
+async def anomaly_baseline_syncer():
+    """Background task: flush Redis anomaly baselines to PostgreSQL every 5 minutes."""
+    from engine.anomaly_detector import sync_baselines_to_db, SYNC_INTERVAL
+    while True:
+        await asyncio.sleep(SYNC_INTERVAL)
+        try:
+            async with AsyncSessionLocal() as db:
+                written = await sync_baselines_to_db(db)
+                if written:
+                    logger.info(f"Anomaly baselines synced: {written} metric(s) written to DB")
+        except Exception as e:
+            logger.error(f"Anomaly baseline sync error: {e}")
+
 
 async def agent_status_checker():
     while True:
@@ -446,12 +646,15 @@ async def agent_status_checker():
             logger.error(f"Agent status checker error: {e}")
 
 
-_checker_task = None
+_checker_task       = None
+_ar_timeout_task      = None
+_anomaly_sync_task    = None
+_correlation_task     = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _checker_task
+    global _checker_task, _ar_timeout_task, _anomaly_sync_task, _correlation_task
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
 
     await init_db()
@@ -463,12 +666,43 @@ async def lifespan(app: FastAPI):
         logger.warning(f"ES setup failed (will retry on demand): {e}")
 
     await seed_defaults()
-    _checker_task = asyncio.create_task(agent_status_checker())
+
+    # Restore anomaly baselines from PostgreSQL → Redis on startup
+    try:
+        from engine.anomaly_detector import load_baselines_from_db
+        async with AsyncSessionLocal() as db:
+            loaded = await load_baselines_from_db(db)
+            logger.info(f"Anomaly baselines restored: {loaded} metric(s) loaded from DB into Redis")
+    except Exception as e:
+        logger.warning(f"Anomaly baseline restore skipped: {e}")
+
+    # Seed default correlation rules
+    try:
+        from routes.correlation import seed_default_correlation_rules
+        async with AsyncSessionLocal() as db:
+            await seed_default_correlation_rules(db)
+            await db.commit()
+            logger.info("Correlation rules seeded")
+    except Exception as e:
+        logger.warning(f"Correlation rules seed skipped: {e}")
+
+    _checker_task      = asyncio.create_task(agent_status_checker())
+    _ar_timeout_task   = asyncio.create_task(ar_timeout_checker())
+    _anomaly_sync_task = asyncio.create_task(anomaly_baseline_syncer())
+
+    # Correlation engine background evaluator
+    try:
+        from services.correlation_engine import correlation_evaluator
+        _correlation_task = asyncio.create_task(correlation_evaluator())
+        logger.info("Correlation engine started")
+    except Exception as e:
+        logger.warning(f"Correlation engine failed to start: {e}")
 
     yield
 
-    if _checker_task:
-        _checker_task.cancel()
+    for task in (_checker_task, _ar_timeout_task, _anomaly_sync_task, _correlation_task):
+        if task:
+            task.cancel()
     logger.info("SIEM backend shutting down")
 
 
@@ -521,6 +755,11 @@ app.include_router(audit_router)
 app.include_router(installer_router)
 app.include_router(totp_router)
 app.include_router(system_config_router)
+app.include_router(inventory_router)
+app.include_router(notifications_router)
+app.include_router(cases_router)
+app.include_router(threat_intel_router)
+app.include_router(correlation_router)
 
 
 @app.get("/api/health", include_in_schema=False)

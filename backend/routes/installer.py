@@ -13,11 +13,8 @@ import tarfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import Response, StreamingResponse
-
-from routes.auth import get_current_user
-from models.user import User
 
 router = APIRouter(prefix="/api/installer", tags=["installer"])
 
@@ -25,12 +22,6 @@ router = APIRouter(prefix="/api/installer", tags=["installer"])
 _AGENT_DIR = Path(os.getenv("AGENT_DIR", "/app/agent"))
 if not _AGENT_DIR.exists():
     _AGENT_DIR = Path(__file__).resolve().parents[2] / "agent"
-
-
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def _ok(user: User = Depends(get_current_user)) -> User:
-    return user
 
 
 # ── Linux bash installer ──────────────────────────────────────────────────────
@@ -312,12 +303,12 @@ def _windows_script(manager_url: str, agent_name: str) -> str:
 .SYNOPSIS
     SecureWatch SIEM Agent Installer for Windows
 .DESCRIPTION
-    Installs the SecureWatch SIEM agent as a Windows service.
+    Installs the SecureWatch SIEM agent as a proper Windows service via pywin32.
     Supports Windows 10/11, Windows Server 2016/2019/2022.
 .NOTES
     Run in an elevated PowerShell:
     Set-ExecutionPolicy Bypass -Scope Process -Force
-    .\\install.ps1
+    .\\Install-SIEMAgent.ps1
 #>
 
 Set-StrictMode -Version Latest
@@ -334,22 +325,15 @@ $PythonMin   = [Version]"3.8"
 $LogFile     = "$InstallDir\\install.log"
 
 # ── helpers ──────────────────────────────────────────────────
-function Write-Step   {{ param($n, $m) Write-Host "`n[$n] $m" -ForegroundColor Cyan }}
-function Write-Ok     {{ param($m) Write-Host "  [+] $m" -ForegroundColor Green }}
-function Write-Warn   {{ param($m) Write-Host "  [!] $m" -ForegroundColor Yellow }}
-function Write-Fail   {{ param($m) throw "  [x] $m" }}
-
-function Invoke-Step {{
-    param([string]$Desc, [scriptblock]$Action)
-    try   {{ & $Action; Write-Ok $Desc }}
-    catch {{ Write-Fail "$Desc — $_" }}
-}}
+function Write-Step {{ param($n, $m) Write-Host "`n[$n] $m" -ForegroundColor Cyan }}
+function Write-Ok   {{ param($m) Write-Host "  [+] $m" -ForegroundColor Green }}
+function Write-Warn {{ param($m) Write-Host "  [!] $m" -ForegroundColor Yellow }}
+function Write-Fail {{ param($m) throw "[x] $m" }}
 
 # ── banner ───────────────────────────────────────────────────
-Clear-Host
-Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║   SecureWatch SIEM  ·  Agent Installer   ║" -ForegroundColor Cyan
-Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "`n  +==========================================+" -ForegroundColor Cyan
+Write-Host "  |   SecureWatch SIEM  -  Agent Installer   |" -ForegroundColor Cyan
+Write-Host "  +==========================================+`n" -ForegroundColor Cyan
 Write-Host "  Manager : $ManagerUrl"
 Write-Host "  Agent   : $AgentName"
 Write-Host "  Dir     : $InstallDir`n"
@@ -358,19 +342,19 @@ Write-Host "  Dir     : $InstallDir`n"
 Write-Step "1/5" "Pre-flight checks"
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
     ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {{
-    Write-Fail "Run as Administrator"
+    Write-Fail "Script must run as Administrator. Right-click PowerShell -> Run as Administrator."
 }}
 
 try {{
-    $health = Invoke-RestMethod -Uri "$ManagerUrl/api/health" -TimeoutSec 5
+    $health = Invoke-RestMethod -Uri "$ManagerUrl/api/health" -TimeoutSec 8 -UseBasicParsing
     Write-Ok "Manager reachable (status: $($health.status))"
 }} catch {{
-    Write-Warn "Cannot reach $ManagerUrl — check URL/firewall"
+    Write-Warn "Cannot reach $ManagerUrl - continuing anyway. Check URL/firewall after install."
 }}
 
-# Ensure log dir
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-Start-Transcript -Path $LogFile -Append | Out-Null
+Start-Transcript -Path $LogFile -Append -ErrorAction SilentlyContinue | Out-Null
+Write-Ok "Pre-flight passed"
 
 # ── Python ───────────────────────────────────────────────────
 Write-Step "2/5" "Checking Python $PythonMin+"
@@ -380,14 +364,13 @@ foreach ($cmd in @('python', 'python3', 'py')) {{
     try {{
         $ver = & $cmd --version 2>&1
         if ($ver -match '(\\d+\\.\\d+\\.\\d+)') {{
-            $v = [Version]$Matches[1]
-            if ($v -ge $PythonMin) {{ $python = $cmd; break }}
+            if ([Version]$Matches[1] -ge $PythonMin) {{ $python = $cmd; break }}
         }}
     }} catch {{ }}
 }}
 
 if (-not $python) {{
-    Write-Warn "Python $PythonMin+ not found. Attempting install via winget..."
+    Write-Warn "Python $PythonMin+ not found — installing via winget..."
     try {{
         winget install --id Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
@@ -395,37 +378,92 @@ if (-not $python) {{
         $python = 'python'
         Write-Ok "Python installed via winget"
     }} catch {{
-        Write-Fail "Could not install Python automatically.`nDownload from https://www.python.org/downloads/ and re-run."
+        Write-Fail "Cannot install Python automatically.`nInstall from https://www.python.org/downloads/ (check 'Add Python to PATH') then re-run."
     }}
 }}
 Write-Ok "Using $(& $python --version)"
 
-# ── Download agent ───────────────────────────────────────────
+# ── Download agent archive ────────────────────────────────────
 Write-Step "3/5" "Downloading agent"
 
 $archive = "$env:TEMP\\siem-agent.tar.gz"
-Invoke-WebRequest -Uri "$ManagerUrl/api/installer/agent.tar.gz" `
-    -OutFile $archive -UseBasicParsing -TimeoutSec 60
+try {{
+    Invoke-WebRequest -Uri "$ManagerUrl/api/installer/agent.tar.gz" `
+        -OutFile $archive -UseBasicParsing -TimeoutSec 90
+}} catch {{
+    Write-Fail "Download failed: $_`nEnsure the SIEM server is running and port 8000 is reachable."
+}}
 
-# Extract (requires tar.exe — available on Win 10 1803+)
-Push-Location $InstallDir
-try   {{ tar -xzf $archive --strip-components=0 2>&1 | Out-Null }}
-catch {{ Write-Fail "Extraction failed. Requires Windows 10 1803+ or tar.exe in PATH." }}
-Pop-Location
-Remove-Item $archive -Force
+# tar.exe is built-in on Windows 10 1803+ (build 17063+)
+try {{
+    Push-Location $InstallDir
+    tar -xzf $archive --strip-components=0 2>&1 | Out-Null
+    Pop-Location
+}} catch {{
+    Pop-Location
+    Write-Fail "Extraction failed. Requires Windows 10 build 17063+ (tar.exe). Error: $_"
+}}
+Remove-Item $archive -Force -ErrorAction SilentlyContinue
 Write-Ok "Agent extracted to $InstallDir"
 
-# ── venv & deps ──────────────────────────────────────────────
-Write-Step "4/5" "Setting up virtual environment"
+# ── Virtual environment + dependencies ───────────────────────
+Write-Step "4/5" "Setting up virtual environment + dependencies"
+
+$venvPython = "$InstallDir\\venv\\Scripts\\python.exe"
+$venvPip    = "$InstallDir\\venv\\Scripts\\pip.exe"
 
 if (-not (Test-Path "$InstallDir\\venv")) {{
-    & $python -m venv "$InstallDir\\venv" | Out-Null
+    & $python -m venv "$InstallDir\\venv"
+    Write-Ok "Virtual environment created"
 }}
-& "$InstallDir\\venv\\Scripts\\pip.exe" install --quiet --upgrade pip
-& "$InstallDir\\venv\\Scripts\\pip.exe" install --quiet -r "$InstallDir\\requirements.txt"
-Write-Ok "Dependencies installed"
 
-# ── config ───────────────────────────────────────────────────
+& $venvPython -m pip install --quiet --upgrade pip | Out-Null
+& $venvPython -m pip install -r "$InstallDir\\requirements.txt"
+if ($LASTEXITCODE -ne 0) {{
+    Write-Fail "Dependency installation failed (exit $LASTEXITCODE). Check pip output above."
+}}
+Write-Ok "Python packages installed (including pywin32)"
+
+# ── pywin32 DLL registration ─────────────────────────────────
+# Windows SCM launches pythonservice.exe in a restricted environment.
+# It needs pywintypes3XX.dll AND python3XX.dll in System32.
+# We copy both sets explicitly since we have admin rights here.
+
+# 1. pywin32 DLLs (pywintypes314.dll, pythoncom314.dll, etc.)
+$pywin32DllSrc = "$InstallDir\\venv\\Lib\\site-packages\\pywin32_system32"
+if (Test-Path $pywin32DllSrc) {{
+    Get-ChildItem $pywin32DllSrc -Filter "*.dll" | ForEach-Object {{
+        Copy-Item $_.FullName "$env:SystemRoot\\System32\\" -Force -ErrorAction SilentlyContinue
+        Write-Ok "Registered: $($_.Name)"
+    }}
+}} else {{
+    Write-Warn "pywin32_system32 dir not found — DLLs may be missing"
+}}
+
+# 2. Python runtime DLL (python314.dll) — per-user installs put this outside System32
+$basePython = & $venvPython -c "import sys; print(sys.base_prefix)"
+if ($basePython) {{
+    Get-ChildItem $basePython -Filter "python*.dll" -ErrorAction SilentlyContinue | ForEach-Object {{
+        Copy-Item $_.FullName "$env:SystemRoot\\System32\\" -Force -ErrorAction SilentlyContinue
+        Write-Ok "Registered: $($_.Name)"
+    }}
+}}
+
+# 3. Run pywin32_postinstall to register the Event Log source
+$pw32Candidates = @(
+    "$InstallDir\\venv\\Scripts\\pywin32_postinstall.py",
+    "$InstallDir\\venv\\Lib\\site-packages\\pywin32_postinstall.py"
+)
+$pw32PostInstall = $pw32Candidates | Where-Object {{ Test-Path $_ }} | Select-Object -First 1
+if ($pw32PostInstall) {{
+    & $venvPython $pw32PostInstall -install 2>&1 | Out-Null
+    Write-Ok "pywin32 post-install complete"
+}} else {{
+    & $venvPython -c "import pywin32_postinstall; pywin32_postinstall.install()" 2>&1 | Out-Null
+    Write-Ok "pywin32 post-install complete (module mode)"
+}}
+
+# ── Write config.yaml ─────────────────────────────────────────
 $config = @"
 manager_url: $ManagerUrl
 agent_name: $AgentName
@@ -444,57 +482,414 @@ fim_paths:
   - C:\\Windows\\System32\\drivers\\etc\\hosts
   - C:\\Windows\\System32\\drivers\\etc\\services
 
+fim_realtime_paths:
+  - C:\\Windows\\System32\\drivers\\etc
+  - C:\\Users
+  - C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup
+
 windows_event_logs:
   - Security
   - System
   - Application
+  - Microsoft-Windows-PowerShell/Operational
+
 windows_events_max: 500
+sysmon_enabled: true
+registry_fim_interval: 120
+service_monitor_interval: 120
+
+buffer_max_batches: 2000
+buffer_ttl_hours: 48
+buffer_drain_interval: 30
+dedup_window: 60
+geoip_enabled: false
+
+exclusions:
+  message_contains: []
+  source_ends_with: []
+  event_types: []
+  log_levels: []
 "@
 $config | Set-Content "$InstallDir\\config.yaml" -Encoding UTF8
-Write-Ok "Config written to $InstallDir\\config.yaml"
+Write-Ok "config.yaml written to $InstallDir"
 
-# ── Windows Service ──────────────────────────────────────────
-Write-Step "5/5" "Installing Windows service"
+# ── Register agent as Windows Scheduled Task (SYSTEM, auto-start) ─────────────────
+Write-Step "5/5" "Registering agent as Windows Scheduled Task (SYSTEM)"
 
-$exePath = "$InstallDir\\venv\\Scripts\\python.exe"
-$agentScript = "$InstallDir\\agent.py"
-
-# Remove old service if exists
-$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($svc) {{
-    Stop-Service  -Name $ServiceName -Force -ErrorAction SilentlyContinue
+# Clean up any legacy service or task
+$oldSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($oldSvc) {{
+    Write-Warn "Existing service found — removing..."
+    Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
     sc.exe delete $ServiceName | Out-Null
-    Start-Sleep -Seconds 2
+    Start-Sleep 1
+    Write-Ok "Old service removed"
 }}
+Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false -ErrorAction SilentlyContinue
 
-# Use sc.exe to create the service
-# We wrap via cmd /c to handle the python script launch
-$binPath = "`"$exePath`" `"$agentScript`""
-sc.exe create $ServiceName binPath= $binPath `
-    start= auto obj= "LocalSystem" DisplayName= $ServiceDesc | Out-Null
+# Join-Path avoids Python f-string backslash-escape pitfalls entirely
+$logFile = Join-Path $InstallDir "agent.log"
+$agentPy = Join-Path $InstallDir "agent.py"
+$cmdFile = Join-Path $InstallDir "run_agent.cmd"
 
-sc.exe description $ServiceName $ServiceDesc | Out-Null
-sc.exe failure $ServiceName reset= 60 actions= restart/10000/restart/10000/restart/30000 | Out-Null
+# Write .cmd launcher — Set-Content adds CRLF; PowerShell expands $logFile etc.
+@(
+    "@echo off",
+    "set DATA_DIR=$InstallDir",
+    "set PYTHONUNBUFFERED=1",
+    "cd /d `"$InstallDir`"",
+    "echo [%DATE% %TIME%] SIEMAgent starting >> `"$logFile`"",
+    "`"$venvPython`" `"$agentPy`" >> `"$logFile`" 2>&1",
+    "echo [%DATE% %TIME%] SIEMAgent stopped exit=%ERRORLEVEL% >> `"$logFile`""
+) | Set-Content $cmdFile -Encoding ASCII
+Write-Ok "Launcher written: $cmdFile"
 
-Start-Service -Name $ServiceName
-Start-Sleep -Seconds 3
-
-$svc = Get-Service -Name $ServiceName
-if ($svc.Status -eq 'Running') {{
-    Write-Ok "Service '$ServiceName' is running"
+# ── Smoke test: run as current admin to verify Python can actually start ──────────
+Write-Warn "Smoke-testing Python (5 s)..."
+$testProc = Start-Process -FilePath $env:ComSpec `
+    -ArgumentList ('/c "{0}"' -f $cmdFile) `
+    -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden
+Start-Sleep -Seconds 5
+if (Test-Path $logFile) {{
+    Write-Ok "agent.log created — Python launched OK:"
+    Get-Content $logFile -TotalCount 6 -ErrorAction SilentlyContinue |
+        ForEach-Object {{ Write-Host "     $_" }}
 }} else {{
-    Write-Warn "Service status: $($svc.Status) — check Event Viewer"
+    Write-Warn "agent.log missing — Python may have crashed on import"
+    Write-Warn ('Debug: & "{0}" "{1}"' -f $venvPython, $agentPy)
+}}
+if ($testProc -and -not $testProc.HasExited) {{ $testProc.Kill() }}
+Remove-Item $logFile -ErrorAction SilentlyContinue   # SYSTEM task will recreate it
+
+# ── Register scheduled task ───────────────────────────────────────────────────────
+$action = New-ScheduledTaskAction `
+    -Execute $env:ComSpec `
+    -Argument ('/c "{0}"' -f $cmdFile) `
+    -WorkingDirectory $InstallDir
+
+$trigger  = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -RestartCount 10 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -StartWhenAvailable `
+    -MultipleInstances IgnoreNew
+$settings.DisallowStartIfOnBatteries = $false
+$settings.StopIfGoingOnBatteries     = $false
+$settings.RunOnlyIfNetworkAvailable  = $false
+$settings.RunOnlyIfIdle              = $false
+
+$principal = New-ScheduledTaskPrincipal `
+    -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+
+Register-ScheduledTask `
+    -TaskName $ServiceName -Description $ServiceDesc `
+    -Action $action -Trigger $trigger `
+    -Settings $settings -Principal $principal -Force | Out-Null
+Write-Ok "Task registered: $ServiceName"
+
+# ── Start the task now ────────────────────────────────────────────────────────────
+Start-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 6
+
+$task  = Get-ScheduledTask     -TaskName $ServiceName -ErrorAction SilentlyContinue
+$tInfo = Get-ScheduledTaskInfo -TaskName $ServiceName -ErrorAction SilentlyContinue
+$state = if ($task) {{ $task.State }} else {{ 'not found' }}
+
+if ($state -eq 'Running') {{
+    Write-Ok "Task '$ServiceName' is RUNNING"
+}} else {{
+    $code = if ($tInfo) {{ ' (0x{{0:X}})' -f [int]$tInfo.LastTaskResult }} else {{ '' }}
+    Write-Warn "State: $state$code — trying once more..."
+    Start-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 4
+    $state2 = (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue).State
+    if ($state2 -eq 'Running') {{
+        Write-Ok "Task '$ServiceName' is now RUNNING"
+    }} else {{
+        Write-Warn "State: $state2 — task will auto-start on next boot."
+        Write-Warn ('Start now : Start-ScheduledTask {0}' -f $ServiceName)
+        Write-Warn ('Test run  : & "{0}" "{1}"' -f $venvPython, $agentPy)
+        Write-Warn ('Logs      : Get-Content "{0}" -Tail 30 -Wait' -f $logFile)
+    }}
 }}
 
-Stop-Transcript | Out-Null
+Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
 
-Write-Host "`n  ══════════════════════════════════════════" -ForegroundColor Green
+Write-Host "`n  ===========================================" -ForegroundColor Green
 Write-Host "    Agent installed successfully!" -ForegroundColor Green
-Write-Host "  ══════════════════════════════════════════`n" -ForegroundColor Green
-Write-Host "  Status : Get-Service $ServiceName"
-Write-Host "  Logs   : Get-EventLog -LogName Application -Source $ServiceName -Newest 50"
+Write-Host "  ===========================================`n" -ForegroundColor Green
+Write-Host "  Status : Get-ScheduledTask $ServiceName"
+Write-Host "  Logs   : Get-Content $InstallDir\\agent.log -Tail 50 -Wait"
 Write-Host "  Config : $InstallDir\\config.yaml"
-Write-Host "  Remove : sc.exe stop $ServiceName; sc.exe delete $ServiceName`n"
+Write-Host "  Stop   : Stop-ScheduledTask $ServiceName"
+Write-Host "  Remove : Unregister-ScheduledTask $ServiceName -Confirm:`$false`n"
+"""
+
+
+# ── macOS bash installer ──────────────────────────────────────────────────────
+
+def _macos_script(manager_url: str, agent_name: str) -> str:
+    return f"""\
+#!/usr/bin/env bash
+# ============================================================
+#  SecureWatch SIEM — Agent Installer for macOS
+#  Supports: macOS 12 (Monterey)+, Intel & Apple Silicon
+# ============================================================
+set -euo pipefail
+
+# ── config ───────────────────────────────────────────────────
+MANAGER_URL="{manager_url}"
+AGENT_NAME="{agent_name}"
+INSTALL_DIR="/Library/Application Support/SIEMAgent"
+LABEL="com.securewatch.siem-agent"
+PLIST="/Library/LaunchDaemons/$LABEL.plist"
+SERVICE_USER="_siemagt"
+LOG_FILE="/var/log/siem-agent-install.log"
+
+# ── colours ──────────────────────────────────────────────────
+RED="\\033[0;31m"; GRN="\\033[0;32m"; YLW="\\033[1;33m"
+BLU="\\033[0;34m"; CYN="\\033[0;36m"; BLD="\\033[1m"; RST="\\033[0m"
+
+log()  {{ echo -e "${{GRN}}[✓]${{RST}} $*"   | tee -a "$LOG_FILE"; }}
+warn() {{ echo -e "${{YLW}}[!]${{RST}} $*"   | tee -a "$LOG_FILE"; }}
+err()  {{ echo -e "${{RED}}[✗]${{RST}} $*" >&2; exit 1; }}
+step() {{ echo -e "\\n${{BLU}}[${{BLD}}${{1}}${{RST}}${{BLU}}]${{RST}} ${{2:-}}"; }}
+
+banner() {{
+  echo -e "${{CYN}}"
+  echo "  ╔══════════════════════════════════════════╗"
+  echo "  ║   SecureWatch SIEM  ·  macOS Installer   ║"
+  echo "  ╚══════════════════════════════════════════╝"
+  echo -e "${{RST}}"
+}}
+
+# ── preflight ────────────────────────────────────────────────
+preflight() {{
+  step "1/6" "Pre-flight checks"
+  [[ $EUID -eq 0 ]] || err "Run as root: sudo bash $0"
+  [[ "$(uname -s)" == "Darwin" ]] || err "This installer is for macOS only"
+
+  local os_ver major
+  os_ver=$(sw_vers -productVersion)
+  major=$(echo "$os_ver" | cut -d. -f1)
+  (( major >= 12 )) || warn "macOS $os_ver detected — 12+ recommended"
+
+  if command -v curl &>/dev/null; then
+    curl -sf --max-time 5 "$MANAGER_URL/api/health" -o /dev/null \
+      || warn "Cannot reach $MANAGER_URL — check firewall/URL and re-run"
+  fi
+  log "Pre-flight OK (macOS $os_ver)"
+}}
+
+# ── Python ───────────────────────────────────────────────────
+install_python() {{
+  step "2/6" "Checking Python 3.8+"
+
+  local py_bin=""
+  for cmd in python3.12 python3.11 python3.10 python3.9 python3.8 python3; do
+    if command -v "$cmd" &>/dev/null; then
+      if $cmd -c "import sys; sys.exit(0 if sys.version_info>=(3,8) else 1)" 2>/dev/null; then
+        py_bin="$cmd"; break
+      fi
+    fi
+  done
+
+  if [[ -z "$py_bin" ]]; then
+    warn "Python 3.8+ not found — attempting install via Homebrew..."
+    if command -v brew &>/dev/null; then
+      brew install python@3.11
+      py_bin="$(brew --prefix)/bin/python3.11"
+    else
+      warn "Homebrew not found. Install from https://brew.sh then re-run."
+      warn "Or install Python from https://www.python.org/downloads/macos/"
+      err "Python 3.8+ is required"
+    fi
+  fi
+
+  PYTHON="$py_bin"
+  log "Using $($PYTHON --version)"
+}}
+
+# ── create system account ────────────────────────────────────
+create_user() {{
+  step "3/6" "Creating service account"
+
+  if ! id "$SERVICE_USER" &>/dev/null; then
+    local uid=300
+    while dscl . -list /Users UniqueID 2>/dev/null | awk '{{print $2}}' | grep -q "^${{uid}}$"; do
+      (( uid++ ))
+    done
+    dscl . -create "/Users/$SERVICE_USER"
+    dscl . -create "/Users/$SERVICE_USER" UserShell /usr/bin/false
+    dscl . -create "/Users/$SERVICE_USER" RealName "SIEM Agent"
+    dscl . -create "/Users/$SERVICE_USER" UniqueID "$uid"
+    dscl . -create "/Users/$SERVICE_USER" PrimaryGroupID 20
+    dscl . -create "/Users/$SERVICE_USER" NFSHomeDirectory /var/empty
+    log "System account '$SERVICE_USER' created (UID $uid)"
+  else
+    log "System account '$SERVICE_USER' already exists"
+  fi
+}}
+
+# ── download & extract ───────────────────────────────────────
+install_agent() {{
+  step "4/6" "Downloading agent"
+  mkdir -p "$INSTALL_DIR"
+
+  local archive="/tmp/siem-agent.tar.gz"
+  curl -fsSL --max-time 60 \
+    "$MANAGER_URL/api/installer/agent.tar.gz" \
+    -o "$archive" || err "Download failed"
+
+  tar -xzf "$archive" -C "$INSTALL_DIR" --strip-components=0
+  rm -f "$archive"
+  log "Agent extracted to $INSTALL_DIR"
+}}
+
+# ── venv & deps ──────────────────────────────────────────────
+setup_venv() {{
+  step "5/6" "Setting up virtual environment"
+
+  if [[ ! -d "$INSTALL_DIR/venv" ]]; then
+    $PYTHON -m venv "$INSTALL_DIR/venv"
+  fi
+
+  "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
+  "$INSTALL_DIR/venv/bin/pip" install --quiet \
+    -r "$INSTALL_DIR/requirements.txt"
+
+  chown -R "$SERVICE_USER":staff "$INSTALL_DIR"
+  log "Dependencies installed"
+}}
+
+# ── config ───────────────────────────────────────────────────
+write_config() {{
+  cat > "$INSTALL_DIR/config.yaml" <<YAML
+manager_url: $MANAGER_URL
+agent_name: $AGENT_NAME
+check_interval: 60
+heartbeat_interval: 30
+fim_interval: 300
+rootcheck_interval: 3600
+process_interval: 30
+network_interval: 30
+batch_size: 100
+log_level: INFO
+
+log_paths:
+  - /var/log/system.log
+  - /var/log/install.log
+  - /Library/Logs/DiagnosticReports
+
+fim_paths:
+  - /etc/hosts
+  - /etc/sudoers
+  - /etc/ssh/sshd_config
+  - /Library/LaunchDaemons
+  - /Library/LaunchAgents
+YAML
+  log "Config written to $INSTALL_DIR/config.yaml"
+}}
+
+# ── LaunchDaemon ─────────────────────────────────────────────
+setup_service() {{
+  step "6/6" "Installing LaunchDaemon"
+
+  if launchctl list 2>/dev/null | grep -q "$LABEL"; then
+    launchctl unload "$PLIST" 2>/dev/null || true
+  fi
+
+  cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$INSTALL_DIR/venv/bin/python</string>
+    <string>$INSTALL_DIR/agent.py</string>
+  </array>
+  <key>UserName</key>
+  <string>$SERVICE_USER</string>
+  <key>WorkingDirectory</key>
+  <string>$INSTALL_DIR</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/var/log/siem-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/siem-agent-error.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+</dict>
+</plist>
+PLIST
+
+  chmod 644 "$PLIST"
+  chown root:wheel "$PLIST"
+  launchctl load -w "$PLIST"
+  sleep 2
+
+  if launchctl list 2>/dev/null | grep -q "$LABEL"; then
+    log "LaunchDaemon '$LABEL' is running"
+  else
+    warn "LaunchDaemon may not have started — check: tail -f /var/log/siem-agent.log"
+  fi
+}}
+
+# ── uninstall ────────────────────────────────────────────────
+uninstall() {{
+  echo -e "${{YLW}}Uninstalling SecureWatch agent...${{RST}}"
+  launchctl unload "$PLIST" 2>/dev/null || true
+  rm -f "$PLIST"
+  rm -rf "$INSTALL_DIR"
+  dscl . -delete "/Users/$SERVICE_USER" 2>/dev/null || true
+  echo "Done."
+  exit 0
+}}
+
+# ── entrypoint ───────────────────────────────────────────────
+main() {{
+  [[ "${{1:-}}" == "--uninstall" ]] && uninstall
+
+  exec > >(tee -a "$LOG_FILE") 2>&1
+  banner
+  echo "  Manager : $MANAGER_URL"
+  echo "  Agent   : $AGENT_NAME"
+  echo "  Dir     : $INSTALL_DIR"
+  echo
+
+  preflight
+  install_python
+  create_user
+  install_agent
+  setup_venv
+  write_config
+  setup_service
+
+  echo
+  echo -e "${{GRN}}${{BLD}}════════════════════════════════════════════${{RST}}"
+  echo -e "${{GRN}}${{BLD}}  Agent installed successfully!              ${{RST}}"
+  echo -e "${{GRN}}${{BLD}}════════════════════════════════════════════${{RST}}"
+  echo
+  echo "  Status : launchctl list | grep $LABEL"
+  echo "  Logs   : tail -f /var/log/siem-agent.log"
+  echo "  Config : $INSTALL_DIR/config.yaml"
+  echo "  Remove : sudo bash $0 --uninstall"
+  echo
+}}
+
+main "$@"
 """
 
 
@@ -544,12 +939,14 @@ networks:
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+# Installer endpoints are intentionally public — they serve only installer scripts
+# and agent source code (no secrets). The Windows/Linux scripts need to download
+# agent.tar.gz during install without a browser session, so no auth is required.
 
 @router.get("/linux")
 async def linux_installer(
     manager_url: str = Query(..., description="SIEM backend URL"),
     agent_name:  str = Query("my-agent", description="Agent hostname/name"),
-    _: User = Depends(_ok),
 ):
     script = _linux_script(manager_url.rstrip("/"), agent_name)
     return Response(
@@ -563,13 +960,27 @@ async def linux_installer(
 async def windows_installer(
     manager_url: str = Query(...),
     agent_name:  str = Query("my-agent"),
-    _: User = Depends(_ok),
 ):
     script = _windows_script(manager_url.rstrip("/"), agent_name)
+    # UTF-8 BOM tells PowerShell to read as UTF-8 (avoids cp1252 misreads)
+    content = "﻿" + script
     return Response(
-        content=script,
+        content=content.encode("utf-8"),
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="Install-SIEMAgent.ps1"'},
+    )
+
+
+@router.get("/macos")
+async def macos_installer(
+    manager_url: str = Query(..., description="SIEM backend URL"),
+    agent_name:  str = Query("my-agent", description="Agent hostname/name"),
+):
+    script = _macos_script(manager_url.rstrip("/"), agent_name)
+    return Response(
+        content=script,
+        media_type="text/x-shellscript",
+        headers={"Content-Disposition": 'attachment; filename="install-siem-agent-macos.sh"'},
     )
 
 
@@ -577,14 +988,13 @@ async def windows_installer(
 async def docker_snippet(
     manager_url: str = Query(...),
     agent_name:  str = Query("my-agent"),
-    _: User = Depends(_ok),
 ):
     return Response(content=_docker_snippet(manager_url.rstrip("/"), agent_name),
                     media_type="text/yaml")
 
 
 @router.get("/agent.tar.gz")
-async def agent_archive(_: User = Depends(_ok)):
+async def agent_archive():
     """Stream the agent directory as a gzipped tarball."""
     if not _AGENT_DIR.exists():
         from fastapi import HTTPException

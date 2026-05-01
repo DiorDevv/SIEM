@@ -41,3 +41,11 @@ Thumbs.db
 data/
 postgres_data/
 redis_data/
+
+# Agent runtime state files
+agent/.agent_id
+agent/.fim_state.json
+agent/.log_positions
+agent/.prev_pids
+agent/.journald_cursor
+agent/buffer.db

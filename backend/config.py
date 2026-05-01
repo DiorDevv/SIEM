@@ -89,12 +89,22 @@ class Settings(BaseSettings):
     ABUSEIPDB_ENABLED:  bool = os.getenv("ABUSEIPDB_ENABLED", "false").lower() == "true"
     ABUSEIPDB_MIN_SCORE: int = int(os.getenv("ABUSEIPDB_MIN_SCORE", "50"))
 
+    # VirusTotal v3 API (free: 500 lookups/day)
+    VT_API_KEY: str = os.getenv("VT_API_KEY", "")
+
+    # Correlation Engine
+    CORRELATION_EVAL_INTERVAL: int = int(os.getenv("CORRELATION_EVAL_INTERVAL", "60"))
+
     # NVD (NIST) CVE API
     NVD_API_KEY: str  = os.getenv("NVD_API_KEY", "")
     NVD_ENABLED: bool = os.getenv("NVD_ENABLED", "true").lower() == "true"
 
     # Prometheus metrics
     METRICS_ENABLED: bool = os.getenv("METRICS_ENABLED", "true").lower() == "true"
+
+    # Agent shared secret — when set, /api/ar/pending and /api/ar/complete
+    # require the matching X-Agent-Token header from agents.
+    AGENT_SECRET: str = os.getenv("AGENT_SECRET", "")
 
     class Config:
         env_file = ".env"

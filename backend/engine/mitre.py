@@ -6,67 +6,91 @@ from typing import Tuple, Optional, Dict, Any
 
 # event_type → (tactic, technique_id, technique_name)
 _EVENT_MAP: Dict[str, Tuple[str, str, str]] = {
-    # Initial Access
-    "ssh_failed":            ("Initial Access",         "T1190",     "Exploit Public-Facing Application"),
-    "authentication_failed": ("Credential Access",      "T1110",     "Brute Force"),
-    "brute_force_ssh":       ("Credential Access",      "T1110.001", "Password Guessing"),
-    "invalid_user":          ("Reconnaissance",         "T1592",     "Gather Victim Identity Information"),
-    "ssh_invalid_user":      ("Reconnaissance",         "T1592",     "Gather Victim Identity Information"),
+    # ── Initial Access / Credential Access ───────────────────────────────────
+    "ssh_failed":              ("Credential Access",      "T1110.001", "Brute Force: Password Guessing"),
+    "ssh_invalid_user":        ("Reconnaissance",         "T1592.001", "Gather Victim Identity Information"),
+    "ssh_accepted":            ("Lateral Movement",       "T1021.004", "Remote Services: SSH"),
+    "ssh_disconnect":          ("Lateral Movement",       "T1021.004", "Remote Services: SSH"),
+    "max_auth_exceeded":       ("Credential Access",      "T1110.001", "Brute Force: Password Guessing"),
+    "authentication_success":  ("Initial Access",         "T1078",     "Valid Accounts"),
+    "authentication_failed":   ("Credential Access",      "T1110",     "Brute Force"),
+    "brute_force_ssh":         ("Credential Access",      "T1110.001", "Brute Force: Password Guessing"),
+    "invalid_user":            ("Reconnaissance",         "T1592",     "Gather Victim Identity Information"),
 
-    # Execution
-    "sudo_command":          ("Privilege Escalation",   "T1548.003", "Sudo and Sudo Caching"),
-    "sudo_auth_failed":      ("Privilege Escalation",   "T1548.003", "Sudo and Sudo Caching"),
-    "cron_job":              ("Execution",              "T1053.003", "Scheduled Task/Job: Cron"),
-    "process_execution":     ("Execution",              "T1059",     "Command and Scripting Interpreter"),
-    "user_command":          ("Execution",              "T1059",     "Command and Scripting Interpreter"),
+    # ── PAM ──────────────────────────────────────────────────────────────────
+    "pam_auth_failed":         ("Credential Access",      "T1110",     "Brute Force"),
+    "pam_account_locked":      ("Credential Access",      "T1110",     "Brute Force"),
+    "pam_session_opened":      ("Lateral Movement",       "T1021.004", "Remote Services: SSH"),
+    "pam_session_closed":      ("Defense Evasion",        "T1070",     "Indicator Removal"),
 
-    # Persistence
-    "user_created":          ("Persistence",            "T1136.001", "Create Account: Local Account"),
-    "group_created":         ("Persistence",            "T1136",     "Create Account"),
-    "system_call":           ("Execution",              "T1106",     "Native API"),
+    # ── Sudo / Privilege Escalation ──────────────────────────────────────────
+    "sudo_command":            ("Privilege Escalation",   "T1548.003", "Sudo and Sudo Caching"),
+    "sudo_auth_failure":       ("Privilege Escalation",   "T1548.003", "Sudo and Sudo Caching"),
+    "sudo_denied":             ("Privilege Escalation",   "T1548.003", "Sudo and Sudo Caching"),
 
-    # Privilege Escalation
-    "ssh_accepted":          ("Lateral Movement",       "T1021.004", "Remote Services: SSH"),
-    "pam_session_opened":    ("Lateral Movement",       "T1021.004", "Remote Services: SSH"),
-    "authentication_success":("Initial Access",         "T1078",     "Valid Accounts"),
+    # ── Execution ────────────────────────────────────────────────────────────
+    "cron_job":                ("Execution",              "T1053.003", "Scheduled Task/Job: Cron"),
+    "suspicious_cron":         ("Persistence",            "T1053.003", "Scheduled Task/Job: Cron"),
+    "process_execution":       ("Execution",              "T1059",     "Command and Scripting Interpreter"),
+    "user_command":            ("Execution",              "T1059",     "Command and Scripting Interpreter"),
 
-    # Defense Evasion
-    "fim_modified":          ("Defense Evasion",        "T1070",     "Indicator Removal"),
-    "fim_deleted":           ("Defense Evasion",        "T1070.004", "File Deletion"),
-    "pam_session_closed":    ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    # ── Persistence ──────────────────────────────────────────────────────────
+    "user_created":            ("Persistence",            "T1136.001", "Create Account: Local Account"),
+    "user_deleted":            ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "group_created":           ("Persistence",            "T1136",     "Create Account"),
+    "password_changed":        ("Credential Access",      "T1098",     "Account Manipulation"),
+    "package_installed":       ("Persistence",            "T1072",     "Software Deployment Tools"),
+    "package_upgraded":        ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "package_removed":         ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "kernel_module_loaded":    ("Persistence",            "T1547.006", "Boot or Logon Autostart: Kernel Modules"),
 
-    # Credential Access
-    "pam_auth_failed":       ("Credential Access",      "T1110",     "Brute Force"),
-    "pam_account_locked":    ("Credential Access",      "T1110",     "Brute Force"),
-    "max_auth_exceeded":     ("Credential Access",      "T1110.001", "Password Guessing"),
+    # ── Defense Evasion ──────────────────────────────────────────────────────
+    "fim_modified":            ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "fim_deleted":             ("Defense Evasion",        "T1070.004", "File Deletion"),
+    "fim_created":             ("Defense Evasion",        "T1036",     "Masquerading"),
+    "fim_moved":               ("Defense Evasion",        "T1036",     "Masquerading"),
+    "fim_attrib_changed":      ("Privilege Escalation",   "T1222",     "File and Directory Permissions Modification"),
+    "apparmor_denied":         ("Defense Evasion",        "T1562.001", "Disable or Modify Tools"),
 
-    # Discovery
-    "network_connection":    ("Discovery",              "T1046",     "Network Service Discovery"),
-    "http_request":          ("Discovery",              "T1595",     "Active Scanning"),
+    # ── Discovery ────────────────────────────────────────────────────────────
+    "network_connection":      ("Discovery",              "T1046",     "Network Service Discovery"),
+    "network_connected":       ("Discovery",              "T1046",     "Network Service Discovery"),
+    "network_disconnected":    ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "wifi_connected":          ("Discovery",              "T1016",     "System Network Configuration Discovery"),
+    "wifi_disconnected":       ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "wifi_auth_failed":        ("Credential Access",      "T1110",     "Brute Force"),
 
-    # Impact
-    "oom_kill":              ("Impact",                 "T1499",     "Endpoint Denial of Service"),
-    "service_failed":        ("Impact",                 "T1489",     "Service Stop"),
-    "service_killed":        ("Impact",                 "T1489",     "Service Stop"),
+    # ── Command and Control ──────────────────────────────────────────────────
+    "firewall_block":          ("Command and Control",    "T1071",     "Application Layer Protocol"),
+    "ufw_block":               ("Command and Control",    "T1071",     "Application Layer Protocol"),
 
-    # Exfiltration / C2
-    "firewall_block":        ("Command and Control",    "T1071",     "Application Layer Protocol"),
-    "ufw_block":             ("Command and Control",    "T1071",     "Application Layer Protocol"),
+    # ── Exfiltration ─────────────────────────────────────────────────────────
+    "usb_connected":           ("Exfiltration",           "T1052.001", "Exfiltration over Physical Medium"),
+    "usb_disconnected":        ("Exfiltration",           "T1052.001", "Exfiltration over Physical Medium"),
+    "bt_connected":            ("Exfiltration",           "T1011",     "Exfiltration over Other Network Medium"),
 
-    # FIM alerts
-    "fim_created":           ("Defense Evasion",        "T1036",     "Masquerading"),
-    "fim_permissions_changed": ("Privilege Escalation", "T1222",     "File and Directory Permissions Modification"),
-    "fim_ownership_changed": ("Privilege Escalation",   "T1222",     "File and Directory Permissions Modification"),
+    # ── Impact ───────────────────────────────────────────────────────────────
+    "oom_kill":                ("Impact",                 "T1499",     "Endpoint Denial of Service"),
+    "kernel_panic":            ("Impact",                 "T1499",     "Endpoint Denial of Service"),
+    "process_crash":           ("Impact",                 "T1499",     "Endpoint Denial of Service"),
+    "service_failed":          ("Impact",                 "T1489",     "Service Stop"),
+    "service_crashed":         ("Impact",                 "T1489",     "Service Stop"),
+    "service_timeout":         ("Impact",                 "T1489",     "Service Stop"),
+    "container_stopped":       ("Impact",                 "T1489",     "Service Stop"),
+    "container_killed":        ("Impact",                 "T1489",     "Service Stop"),
+    "docker_error":            ("Impact",                 "T1489",     "Service Stop"),
 
-    # Container
-    "container_kill":        ("Impact",                 "T1489",     "Service Stop"),
-    "container_stopped":     ("Impact",                 "T1489",     "Service Stop"),
+    # ── Rootkit / Hidden ─────────────────────────────────────────────────────
+    "rootkit_detected":        ("Defense Evasion",        "T1014",     "Rootkit"),
+    "hidden_process":          ("Defense Evasion",        "T1014",     "Rootkit"),
+    "hidden_file":             ("Defense Evasion",        "T1564.001", "Hidden Files and Directories"),
 
-    # Rootkit indicators
-    "rootkit_detected":      ("Defense Evasion",        "T1014",     "Rootkit"),
-    "hidden_process":        ("Defense Evasion",        "T1014",     "Rootkit"),
-    "hidden_file":           ("Defense Evasion",        "T1564.001", "Hidden Files and Directories"),
-    "kernel_module_loaded":  ("Persistence",            "T1547.006", "Boot or Logon Autostart: Kernel Modules"),
+    # ── System Events ────────────────────────────────────────────────────────
+    "system_shutdown":         ("Impact",                 "T1529",     "System Shutdown/Reboot"),
+    "system_suspend":          ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "screen_lock":             ("Defense Evasion",        "T1070",     "Indicator Removal"),
+    "service_started":         ("Persistence",            "T1543",     "Create or Modify System Process"),
+    "service_stopped":         ("Impact",                 "T1489",     "Service Stop"),
 }
 
 # category → (tactic, technique_id)

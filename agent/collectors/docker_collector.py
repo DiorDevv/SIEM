@@ -93,8 +93,12 @@ _CRYPTO_MINING = re.compile(
 _K8S_SENSITIVE_RESOURCES = {"secrets", "serviceaccounts", "clusterrolebindings", "rolebindings"}
 _K8S_SENSITIVE_VERBS      = {"create", "delete", "update", "patch", "escalate", "bind", "impersonate"}
 
-# ── Docker socket path ────────────────────────────────────────────────────────
-DOCKER_SOCKET = "/var/run/docker.sock"
+# ── Docker socket path (platform-aware) ──────────────────────────────────────
+import sys as _sys
+if _sys.platform == "win32":
+    DOCKER_SOCKET = r"\\.\pipe\docker_engine"
+else:
+    DOCKER_SOCKET = "/var/run/docker.sock"
 
 # ── K8s config / token paths ─────────────────────────────────────────────────
 K8S_TOKEN_PATH  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -145,16 +149,24 @@ def _read_k8s_namespace() -> str:
 # ── Docker via SDK or HTTP ────────────────────────────────────────────────────
 
 async def _docker_request(path: str, timeout: int = 10) -> Optional[Any]:
-    """Make HTTP request to Docker daemon via Unix socket."""
+    """Make HTTP request to Docker daemon via Unix socket (Linux/macOS) or named pipe (Windows)."""
     if not os.path.exists(DOCKER_SOCKET):
         return None
     try:
         import httpx
-        transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET)
-        async with httpx.AsyncClient(transport=transport, timeout=timeout) as client:
-            resp = await client.get(f"http://localhost{path}")
-            if resp.status_code == 200:
-                return resp.json()
+        if _sys.platform == "win32":
+            # Windows: Docker Desktop exposes HTTP on localhost:2375 as fallback,
+            # or use npipe transport if available. Try TCP first.
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"http://localhost:2375{path}")
+                if resp.status_code == 200:
+                    return resp.json()
+        else:
+            transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET)
+            async with httpx.AsyncClient(transport=transport, timeout=timeout) as client:
+                resp = await client.get(f"http://localhost{path}")
+                if resp.status_code == 200:
+                    return resp.json()
     except Exception as e:
         logger.debug(f"Docker socket request failed: {e}")
     return None

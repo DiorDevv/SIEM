@@ -12,7 +12,8 @@ from typing import Dict, List, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.fim_state.json')
+from collectors._paths import data_path as _data_path
+_STATE_FILE = _data_path('.fim_state.json')
 
 
 class FileState:

@@ -6,6 +6,7 @@ Packages are sent to the server which checks them against OSV.dev.
 import sys
 import json
 import logging
+import shutil
 import subprocess
 import re
 from typing import List, Dict, Any
@@ -126,17 +127,17 @@ def collect_packages() -> List[Dict[str, Any]]:
         packages += _collect_windows_registry()
     else:
         # Try dpkg (Debian/Ubuntu)
-        if _run(["which", "dpkg-query"]).strip():
+        if shutil.which("dpkg-query"):
             packages += _collect_dpkg()
         # Try rpm (RHEL/CentOS/Fedora)
-        elif _run(["which", "rpm"]).strip():
+        elif shutil.which("rpm"):
             packages += _collect_rpm()
 
     # Always collect pip packages
     packages += _collect_pip()
 
     # Try npm global packages
-    if _run(["which", "npm"]).strip():
+    if shutil.which("npm"):
         packages += _collect_npm_global()
 
     # Deduplicate by (name, version, ecosystem)

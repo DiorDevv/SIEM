@@ -14,10 +14,17 @@ import ActiveResponse from './pages/ActiveResponse'
 import Vulnerabilities from './pages/Vulnerabilities'
 import SCA from './pages/SCA'
 import AuditLog from './pages/AuditLog'
+import Inventory from './pages/Inventory'
+import Reports from './pages/Reports'
+import Cases from './pages/Cases'
+import ThreatIntel from './pages/ThreatIntel'
+import CorrelationRules from './pages/CorrelationRules'
 import Sidebar from './components/Sidebar'
 import Navbar from './components/Navbar'
 
-const WS_URL = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000') + '/ws/live'
+const WS_URL = import.meta.env.VITE_WS_URL
+  ? import.meta.env.VITE_WS_URL + '/ws/live'
+  : (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/ws/live'
 
 function ProtectedLayout({ children }) {
   const { user } = useAuth()
@@ -145,7 +152,12 @@ function AppRoutes() {
       <Route path="/active-response"  element={<ProtectedLayout><ActiveResponse /></ProtectedLayout>} />
       <Route path="/vulnerabilities" element={<ProtectedLayout><Vulnerabilities /></ProtectedLayout>} />
       <Route path="/sca"             element={<ProtectedLayout><SCA /></ProtectedLayout>} />
+      <Route path="/inventory"       element={<ProtectedLayout><Inventory /></ProtectedLayout>} />
       <Route path="/audit-log"        element={<ProtectedLayout><AuditLog /></ProtectedLayout>} />
+      <Route path="/reports"          element={<ProtectedLayout><Reports /></ProtectedLayout>} />
+      <Route path="/cases"            element={<ProtectedLayout><Cases /></ProtectedLayout>} />
+      <Route path="/threat-intel"     element={<ProtectedLayout><ThreatIntel /></ProtectedLayout>} />
+      <Route path="/correlation"      element={<ProtectedLayout><CorrelationRules /></ProtectedLayout>} />
       <Route path="/settings"        element={<ProtectedLayout><Settings /></ProtectedLayout>} />
       <Route path="*"        element={<Navigate to="/" replace />} />
     </Routes>

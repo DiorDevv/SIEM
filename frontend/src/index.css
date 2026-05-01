@@ -341,3 +341,8 @@ select option { background: var(--bg-secondary); color: var(--text-primary); }
 [data-theme="light"] .page-header-banner p {
   color: var(--text-secondary) !important;
 }
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}

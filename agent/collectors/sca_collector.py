@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 IS_LINUX   = sys.platform.startswith("linux")
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS   = sys.platform == "darwin"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,7 +71,13 @@ def _file_owner(path: str) -> Optional[int]:
 
 def _service_active(name: str) -> bool:
     out = _run(["systemctl", "is-active", name])
-    return out.strip() == "active"
+    if out.strip() == "active":
+        return True
+    # Fallback for OpenRC (Alpine) and other non-systemd init systems
+    rc = _run(["rc-service", name, "status"])
+    if "started" in rc.lower():
+        return True
+    return False
 
 
 def _pkg_installed(name: str) -> bool:
@@ -674,9 +681,196 @@ _LINUX_CHECKS = [
 _WIN_CHECKS = [chk_win_firewall, chk_win_updates, chk_win_uac]
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# macOS-specific (CIS macOS Benchmark)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _defaults(domain: str, key: str) -> Optional[str]:
+    """Read a macOS defaults key."""
+    out = _run(["defaults", "read", domain, key])
+    return out.strip() if out.strip() else None
+
+
+def _pmset(key: str) -> Optional[str]:
+    out = _run(["pmset", "-g"])
+    m = re.search(rf'{key}\s+(\S+)', out)
+    return m.group(1) if m else None
+
+
+def chk_mac_sip() -> Dict:
+    out = _run(["csrutil", "status"])
+    ok = "enabled" in out.lower()
+    return (_pass if ok else _fail)(
+        "MAC-001", "System Integrity Protection (SIP) enabled", "CRITICAL", out[:200],
+        "Boot to Recovery Mode: csrutil enable",
+    )
+
+
+def chk_mac_gatekeeper() -> Dict:
+    out = _run(["spctl", "--status"])
+    ok = "assessments enabled" in (out + _run(["spctl", "--status"])).lower()
+    return (_pass if ok else _fail)(
+        "MAC-002", "Gatekeeper enabled", "HIGH", out[:200],
+        "sudo spctl --master-enable",
+    )
+
+
+def chk_mac_filevault() -> Dict:
+    out = _run(["fdesetup", "status"])
+    ok = "on" in out.lower()
+    return (_pass if ok else _fail)(
+        "MAC-003", "FileVault disk encryption enabled", "HIGH", out[:200],
+        "sudo fdesetup enable",
+    )
+
+
+def chk_mac_firewall() -> Dict:
+    out = _run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"])
+    ok = "enabled" in out.lower()
+    return (_pass if ok else _fail)(
+        "MAC-004", "Application Firewall enabled", "HIGH", out[:200],
+        "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on",
+    )
+
+
+def chk_mac_screen_lock() -> Dict:
+    out = _run(["defaults", "read", "com.apple.screensaver", "askForPassword"])
+    ok = out.strip() == "1"
+    return (_pass if ok else _fail)(
+        "MAC-005", "Screen lock password required", "MEDIUM", out[:200],
+        "defaults write com.apple.screensaver askForPassword -int 1",
+    )
+
+
+def chk_mac_screen_lock_delay() -> Dict:
+    out = _run(["defaults", "read", "com.apple.screensaver", "askForPasswordDelay"])
+    try:
+        delay = int(out.strip())
+        ok = delay <= 5
+    except Exception:
+        ok = False
+        delay = -1
+    return (_pass if ok else _fail)(
+        "MAC-006", f"Screen lock delay ≤5s (current: {delay}s)", "MEDIUM", out[:100],
+        "defaults write com.apple.screensaver askForPasswordDelay -int 0",
+    )
+
+
+def chk_mac_remote_login() -> Dict:
+    out = _run(["systemsetup", "-getremotelogin"])
+    ok = "off" in out.lower()
+    return (_pass if ok else _fail)(
+        "MAC-007", "Remote Login (SSH) disabled", "HIGH", out[:200],
+        "sudo systemsetup -setremotelogin off",
+    )
+
+
+def chk_mac_remote_mgmt() -> Dict:
+    out = _run(["systemsetup", "-getremoteappleevents"])
+    ok = "off" in out.lower()
+    return (_pass if ok else _fail)(
+        "MAC-008", "Remote Apple Events disabled", "MEDIUM", out[:200],
+        "sudo systemsetup -setremoteappleevents off",
+    )
+
+
+def chk_mac_auto_update() -> Dict:
+    out = _run(["defaults", "read", "/Library/Preferences/com.apple.SoftwareUpdate",
+                "AutomaticCheckEnabled"])
+    ok = out.strip() == "1"
+    return (_pass if ok else _fail)(
+        "MAC-009", "Automatic software update checks enabled", "HIGH", out[:200],
+        "sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled -bool true",
+    )
+
+
+def chk_mac_auto_install() -> Dict:
+    out = _run(["defaults", "read", "/Library/Preferences/com.apple.SoftwareUpdate",
+                "AutomaticallyInstallMacOSUpdates"])
+    ok = out.strip() == "1"
+    return (_pass if ok else _fail)(
+        "MAC-010", "Critical OS updates auto-installed", "MEDIUM", out[:200],
+        "sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool true",
+    )
+
+
+def chk_mac_ipv6_disabled() -> Dict:
+    out = _run(["networksetup", "-listallnetworkservices"])
+    services = [l.strip() for l in out.splitlines() if l.strip() and '*' not in l]
+    disabled_count = 0
+    for svc in services[:5]:  # check first 5 services
+        r = _run(["networksetup", "-getinfo", svc])
+        if "IPv6: Off" in r:
+            disabled_count += 1
+    ok = disabled_count > 0  # At least some services have IPv6 off
+    return (_pass if ok else _fail)(
+        "MAC-011", "IPv6 disabled where not needed", "LOW", f"{disabled_count}/{min(5, len(services))} services",
+        "sudo networksetup -setv6off <NetworkService>",
+    )
+
+
+def chk_mac_guest_account() -> Dict:
+    out = _run(["defaults", "read", "/Library/Preferences/com.apple.loginwindow", "GuestEnabled"])
+    ok = out.strip() in ("0", "false", "")
+    return (_pass if ok else _fail)(
+        "MAC-012", "Guest account disabled", "HIGH", out[:100],
+        "sudo defaults write /Library/Preferences/com.apple.loginwindow GuestEnabled -bool false",
+    )
+
+
+def chk_mac_find_my() -> Dict:
+    """Check if Find My Mac (remote wipe) is enabled — also provides location services."""
+    out = _run(["defaults", "read", "/Library/Preferences/com.apple.FindMyMac", "FMMEnabled"])
+    ok = out.strip() == "1"
+    return (_pass if ok else _fail)(
+        "MAC-013", "Find My Mac enabled (remote wipe capability)", "LOW", out[:100],
+        "Enable via System Preferences → Security → Find My Mac",
+    )
+
+
+def chk_mac_safari_autofill() -> Dict:
+    out = _run(["defaults", "read", "com.apple.Safari", "AutoFillPasswords"])
+    ok = out.strip() in ("0", "false")
+    return (_pass if ok else _fail)(
+        "MAC-014", "Safari password autofill disabled", "MEDIUM", out[:100],
+        "defaults write com.apple.Safari AutoFillPasswords -bool false",
+    )
+
+
+def chk_mac_bluetooth_sharing() -> Dict:
+    out = _run(["defaults", "read", "com.apple.Bluetooth", "ControllerPowerState"])
+    # 0 = off, 1 = on — this checks if Bluetooth itself is on, not sharing
+    # Sharing check via blued status
+    ps_out = _run(["ps", "aux"])
+    ok = "bluetoothd" not in ps_out.lower() or True  # Bluetooth itself ok, sharing matters
+    # Check sharing preference
+    share_out = _run(["defaults", "read", "com.apple.bluetoothSharing", "PrefKeyServicesEnabled"])
+    ok = share_out.strip() in ("0", "false", "")
+    return (_pass if ok else _fail)(
+        "MAC-015", "Bluetooth sharing disabled", "MEDIUM", share_out[:100],
+        "System Preferences → Sharing → uncheck Bluetooth Sharing",
+    )
+
+
+_MACOS_CHECKS = [
+    chk_mac_sip, chk_mac_gatekeeper, chk_mac_filevault, chk_mac_firewall,
+    chk_mac_screen_lock, chk_mac_screen_lock_delay, chk_mac_remote_login,
+    chk_mac_remote_mgmt, chk_mac_auto_update, chk_mac_auto_install,
+    chk_mac_ipv6_disabled, chk_mac_guest_account, chk_mac_find_my,
+    chk_mac_safari_autofill, chk_mac_bluetooth_sharing,
+]
+
+
 def run_sca() -> List[Dict[str, Any]]:
     checks = []
-    fns = _LINUX_CHECKS if IS_LINUX else (_WIN_CHECKS if IS_WINDOWS else [])
+    if IS_LINUX:
+        fns = _LINUX_CHECKS
+    elif IS_WINDOWS:
+        fns = _WIN_CHECKS
+    elif IS_MACOS:
+        fns = _MACOS_CHECKS
+    else:
+        fns = []
 
     for fn in fns:
         try:

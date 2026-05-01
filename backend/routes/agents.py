@@ -23,7 +23,13 @@ class AgentRegisterRequest(BaseModel):
 
 
 class HeartbeatRequest(BaseModel):
-    agent_id: str
+    agent_id:      Optional[str]   = None
+    agent_version: Optional[str]   = None
+    agent_cpu_pct: Optional[float] = None
+    agent_mem_mb:  Optional[float] = None
+    buffer_batches: Optional[int]  = None
+    buffer_logs:    Optional[int]  = None
+    server_up:      Optional[bool] = None
 
 
 @router.post("/register")
@@ -117,7 +123,11 @@ async def delete_agent(
 
 
 @router.post("/{agent_id}/heartbeat")
-async def agent_heartbeat(agent_id: str, db: AsyncSession = Depends(get_db)):
+async def agent_heartbeat(
+    agent_id: str,
+    body: Optional[HeartbeatRequest] = None,
+    db: AsyncSession = Depends(get_db),
+):
     from models.active_response import ARExecution, ARExecutionStatus
     from sqlalchemy import and_
 
@@ -128,6 +138,15 @@ async def agent_heartbeat(agent_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Agent not found")
     agent.last_seen = datetime.utcnow()
     agent.status    = AgentStatus.online
+
+    # Store agent self-health metrics from heartbeat payload
+    if body:
+        if body.agent_version  is not None: agent.agent_version  = body.agent_version
+        if body.agent_cpu_pct  is not None: agent.agent_cpu_pct  = body.agent_cpu_pct
+        if body.agent_mem_mb   is not None: agent.agent_mem_mb   = body.agent_mem_mb
+        if body.buffer_batches is not None: agent.buffer_batches = body.buffer_batches
+        if body.buffer_logs    is not None: agent.buffer_logs    = body.buffer_logs
+
     await db.flush()
 
     # Return pending AR actions so the agent can execute them
@@ -159,15 +178,20 @@ async def agent_heartbeat(agent_id: str, db: AsyncSession = Depends(get_db)):
 
 def _agent_to_dict(agent: Agent) -> dict:
     return {
-        "id": agent.id,
-        "agent_id": agent.agent_id,
-        "hostname": agent.hostname,
-        "ip_address": agent.ip_address,
-        "os": agent.os,
-        "os_version": agent.os_version,
-        "agent_version": agent.agent_version,
-        "status": agent.status,
-        "last_seen": agent.last_seen,
-        "registered_at": agent.registered_at,
-        "is_active": agent.is_active,
+        "id":             agent.id,
+        "agent_id":       agent.agent_id,
+        "hostname":       agent.hostname,
+        "ip_address":     agent.ip_address,
+        "os":             agent.os,
+        "os_version":     agent.os_version,
+        "agent_version":  agent.agent_version,
+        "status":         agent.status,
+        "last_seen":      agent.last_seen,
+        "registered_at":  agent.registered_at,
+        "is_active":      agent.is_active,
+        # Self-health metrics
+        "agent_cpu_pct":  agent.agent_cpu_pct,
+        "agent_mem_mb":   agent.agent_mem_mb,
+        "buffer_batches": agent.buffer_batches,
+        "buffer_logs":    agent.buffer_logs,
     }

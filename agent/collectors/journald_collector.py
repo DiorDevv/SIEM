@@ -5,15 +5,16 @@ Handles: screen lock/unlock, auth failures, session open/close,
 """
 import json
 import logging
+import os
 import subprocess
 import re
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Persistent cursor file to avoid re-reading old events
-_CURSOR_FILE = "/tmp/.siem_journald_cursor"
+from collectors._paths import data_path as _data_path
+_CURSOR_FILE = _data_path('.journald_cursor')
 
 # ── Event classification ──────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ _EVENT_PATTERNS: List[tuple] = [
 ]
 
 
-def _classify(message: str) -> tuple[str, str]:
+def _classify(message: str) -> Tuple[str, str]:
     """Returns (event_type, level)."""
     for pattern, etype, level in _EVENT_PATTERNS:
         if pattern.search(message):

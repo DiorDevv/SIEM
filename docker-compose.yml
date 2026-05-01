@@ -1,4 +1,3 @@
-
 services:
 
   # ── Data stores ──────────────────────────────────────────────────────────────
@@ -246,6 +245,19 @@ services:
           cpus: '0.5'
 
   # ── Agent (optional — run with: docker compose --profile agent up) ────────────
+  #
+  # SECURITY NOTE:
+  #   privileged: true  — required for inotify FIM, auditd, process/network monitoring
+  #   pid: host         — required to see all host processes (process_monitor)
+  #
+  # Without these the agent still runs but with reduced visibility:
+  #   - Process monitor only sees container-internal processes
+  #   - Some rootcheck checks will fail gracefully
+  #   - FIM inotify works (watches are created inside the container)
+  #
+  # To run WITHOUT privileged mode (reduced monitoring):
+  #   Remove the `privileged` and `pid` lines below.
+  # ─────────────────────────────────────────────────────────────────────────────
 
   agent:
     build:
@@ -253,13 +265,42 @@ services:
       dockerfile: Dockerfile
     container_name: siem-agent
     restart: unless-stopped
+    privileged: true          # needed for inotify, auditd, /proc access
+    pid: host                 # needed for full host process monitoring
     environment:
       MANAGER_URL: http://backend:8000
+      AGENT_NAME: ${AGENT_NAME:-${HOSTNAME:-siem-agent}}
+      AGENT_SECRET: ${AGENT_SECRET:-}
+      DATA_DIR: /app/data
+      LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
+      GEOIP_ENABLED: ${GEOIP_ENABLED:-false}
+      THREAT_INTEL_ENABLED: ${THREAT_INTEL_ENABLED:-false}
+      ABUSEIPDB_KEY: ${ABUSEIPDB_API_KEY:-}
     volumes:
+      # Host log files — read-only
       - /var/log:/var/log:ro
+      # Host config files — read-only (for FIM and rootcheck)
+      - /etc:/etc:ro
+      # Host proc — read-only (for rootcheck and network monitoring)
+      - /proc:/proc:ro
+      # Host sys — read-only (for kernel module detection)
+      - /sys:/sys:ro
+      # Run/systemd for journald cursor (gracefully skipped if unavailable)
+      - /run/systemd:/run/systemd:ro
+      # Persistent data: buffer.db, .agent_id, state files
+      - agent_data:/app/data
     depends_on:
       backend:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+    sysctls:
+      # Increase inotify limits for real-time FIM on large file trees
+      - fs.inotify.max_user_watches=524288
+      - fs.inotify.max_queued_events=32768
     profiles:
       - agent
 
@@ -276,3 +317,5 @@ volumes:
     driver: local
   nginx_logs:
     driver: local
+  agent_data:
+    driver: local    # persists buffer.db + .agent_id + state files across restarts

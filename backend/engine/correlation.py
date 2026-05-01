@@ -40,9 +40,10 @@ async def _get_redis() -> Optional[aioredis.Redis]:
 # ── Composite attack patterns ─────────────────────────────────────────────────
 
 COMPOSITE_PATTERNS = [
+    # ── Lateral Movement ─────────────────────────────────────────────────────
     {
         "name":            "Lateral Movement — SSH then Sudo",
-        "description":     "SSH login followed by sudo escalation from same session",
+        "description":     "SSH login followed by sudo escalation in the same session",
         "sequence":        ["authentication_success", "sudo_command"],
         "window_seconds":  300,
         "severity":        "HIGH",
@@ -51,9 +52,21 @@ COMPOSITE_PATTERNS = [
         "mitre_technique": "T1021.004",
     },
     {
+        "name":            "Lateral Movement — SSH then Package Install",
+        "description":     "Remote login followed by software installation (backdoor/tool drop)",
+        "sequence":        ["authentication_success", "sudo_command", "package_installed"],
+        "window_seconds":  600,
+        "severity":        "HIGH",
+        "level":           13,
+        "mitre_tactic":    "Persistence",
+        "mitre_technique": "T1072",
+    },
+
+    # ── Privilege Escalation ─────────────────────────────────────────────────
+    {
         "name":            "Privilege Escalation — Multiple Sudo Failures then Success",
-        "description":     "Multiple sudo failures followed by success",
-        "sequence":        ["sudo_auth_failed", "sudo_auth_failed", "sudo_command"],
+        "description":     "Multiple sudo failures followed by successful escalation",
+        "sequence":        ["sudo_auth_failure", "sudo_auth_failure", "sudo_command"],
         "window_seconds":  120,
         "severity":        "HIGH",
         "level":           13,
@@ -61,8 +74,20 @@ COMPOSITE_PATTERNS = [
         "mitre_technique": "T1548.003",
     },
     {
-        "name":            "Persistence — Cron Job Created After Login",
-        "description":     "User logged in and then cron job was executed",
+        "name":            "Privilege Escalation — su to Root",
+        "description":     "User switched to root account using su command",
+        "sequence":        ["authentication_success", "sudo_command"],
+        "window_seconds":  60,
+        "severity":        "HIGH",
+        "level":           12,
+        "mitre_tactic":    "Privilege Escalation",
+        "mitre_technique": "T1548",
+    },
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+    {
+        "name":            "Persistence — Cron Job After Login",
+        "description":     "Scheduled task created shortly after user login",
         "sequence":        ["authentication_success", "cron_job"],
         "window_seconds":  600,
         "severity":        "MEDIUM",
@@ -71,8 +96,30 @@ COMPOSITE_PATTERNS = [
         "mitre_technique": "T1053.003",
     },
     {
-        "name":            "Defense Evasion — Log Cleared",
-        "description":     "Audit log or syslog modification detected",
+        "name":            "Persistence — New User Account Created",
+        "description":     "New local account created after remote login (possible backdoor user)",
+        "sequence":        ["authentication_success", "user_created"],
+        "window_seconds":  300,
+        "severity":        "HIGH",
+        "level":           13,
+        "mitre_tactic":    "Persistence",
+        "mitre_technique": "T1136.001",
+    },
+    {
+        "name":            "Persistence — Kernel Module Loaded After Login",
+        "description":     "Kernel module loaded after remote authentication (rootkit indicator)",
+        "sequence":        ["authentication_success", "kernel_module_loaded"],
+        "window_seconds":  600,
+        "severity":        "CRITICAL",
+        "level":           15,
+        "mitre_tactic":    "Persistence",
+        "mitre_technique": "T1547.006",
+    },
+
+    # ── Defense Evasion ──────────────────────────────────────────────────────
+    {
+        "name":            "Defense Evasion — Log File Cleared",
+        "description":     "Critical log file modified (possible log tampering)",
         "sequence":        ["fim_modified"],
         "window_seconds":  60,
         "severity":        "CRITICAL",
@@ -82,14 +129,80 @@ COMPOSITE_PATTERNS = [
         "path_contains":   "/var/log",
     },
     {
-        "name":            "Credential Access — Multiple Auth Sources",
-        "description":     "Authentication failures from multiple services in short window",
+        "name":            "Defense Evasion — AppArmor Bypass Attempt",
+        "description":     "Repeated AppArmor denials followed by service modification",
+        "sequence":        ["apparmor_denied", "apparmor_denied", "service_started"],
+        "window_seconds":  300,
+        "severity":        "HIGH",
+        "level":           12,
+        "mitre_tactic":    "Defense Evasion",
+        "mitre_technique": "T1562.001",
+    },
+
+    # ── Credential Access ────────────────────────────────────────────────────
+    {
+        "name":            "Credential Access — Multi-Service Auth Failure",
+        "description":     "Authentication failures across multiple services (credential stuffing)",
         "sequence":        ["authentication_failed", "pam_auth_failed"],
         "window_seconds":  60,
         "severity":        "HIGH",
         "level":           12,
         "mitre_tactic":    "Credential Access",
         "mitre_technique": "T1110",
+    },
+    {
+        "name":            "Credential Access — Brute Force then Login",
+        "description":     "Multiple SSH failures from same source followed by successful login",
+        "sequence":        ["ssh_failed", "ssh_failed", "authentication_success"],
+        "window_seconds":  120,
+        "severity":        "CRITICAL",
+        "level":           14,
+        "mitre_tactic":    "Credential Access",
+        "mitre_technique": "T1110.001",
+    },
+
+    # ── Impact ───────────────────────────────────────────────────────────────
+    {
+        "name":            "Impact — Multiple Service Failures",
+        "description":     "Multiple service failures in short window (possible attack or misconfiguration)",
+        "sequence":        ["service_failed", "service_failed", "service_failed"],
+        "window_seconds":  120,
+        "severity":        "HIGH",
+        "level":           11,
+        "mitre_tactic":    "Impact",
+        "mitre_technique": "T1489",
+    },
+    {
+        "name":            "Impact — Container Killed then Host File Modified",
+        "description":     "Container terminated followed by host filesystem modification (container escape indicator)",
+        "sequence":        ["container_stopped", "fim_modified"],
+        "window_seconds":  120,
+        "severity":        "CRITICAL",
+        "level":           15,
+        "mitre_tactic":    "Impact",
+        "mitre_technique": "T1610",
+    },
+
+    # ── Exfiltration ─────────────────────────────────────────────────────────
+    {
+        "name":            "Exfiltration — USB Connected After Login",
+        "description":     "USB device connected shortly after user authentication (data theft indicator)",
+        "sequence":        ["authentication_success", "usb_connected"],
+        "window_seconds":  300,
+        "severity":        "MEDIUM",
+        "level":           9,
+        "mitre_tactic":    "Exfiltration",
+        "mitre_technique": "T1052.001",
+    },
+    {
+        "name":            "Exfiltration — FIM + Network Connection",
+        "description":     "Sensitive file modified then network connection established (data staging)",
+        "sequence":        ["fim_modified", "network_connected"],
+        "window_seconds":  120,
+        "severity":        "HIGH",
+        "level":           12,
+        "mitre_tactic":    "Exfiltration",
+        "mitre_technique": "T1048",
     },
 ]
 

@@ -101,6 +101,12 @@ const NAV_ITEMS = [
       <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
     </svg>
   )},
+  { id: 'notifications', label: 'Notifications', labelUz: 'Bildirishnomalar', adminOnly: true, icon: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </svg>
+  )},
 ]
 
 /* ─────────────────────────────────────────────────────────────────
@@ -1210,30 +1216,293 @@ function SystemTab({ t, isAdmin }) {
         </SectionCard>
       )}
 
-      {/* Notifications */}
-      <SectionCard title={t('settings.notifSettings')}>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   NOTIFICATIONS TAB
+───────────────────────────────────────────────────────────────── */
+const CHANNEL_TYPES = [
+  { id: 'email',    label: 'Email (SMTP)',   icon: '📧', color: '#3b82f6' },
+  { id: 'telegram', label: 'Telegram Bot',   icon: '✈️',  color: '#0ea5e9' },
+  { id: 'slack',    label: 'Slack Webhook',  icon: '💬', color: '#10b981' },
+  { id: 'discord',  label: 'Discord Webhook',icon: '🎮', color: '#8b5cf6' },
+  { id: 'webhook',  label: 'Generic Webhook',icon: '🔗', color: '#f59e0b' },
+]
+const SEV_LIST = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+const SEV_COLORS_N = { LOW: '#3b82f6', MEDIUM: '#f59e0b', HIGH: '#f97316', CRITICAL: '#ef4444' }
+
+function ChannelConfigFields({ type, config, setConfig }) {
+  const f = (key, placeholder, label, secret) => (
+    <div key={key}>
+      <Label>{label}</Label>
+      <input
+        type={secret ? 'password' : 'text'}
+        value={config[key] || ''}
+        placeholder={placeholder}
+        onChange={e => setConfig(p => ({ ...p, [key]: e.target.value }))}
+        className="w-full"
+        autoComplete="off"
+      />
+    </div>
+  )
+  if (type === 'email') return (
+    <div className="grid grid-cols-2 gap-3">
+      {f('smtp_host', 'smtp.gmail.com', 'SMTP Host')}
+      {f('smtp_port', '587', 'SMTP Port')}
+      {f('smtp_user', 'user@example.com', 'Username')}
+      {f('smtp_password', '••••••••', 'Password', true)}
+      {f('to_email', 'alerts@company.com', 'To Email')}
+      <div>
+        <Label>Use TLS</Label>
+        <select value={config.use_tls === false ? 'false' : 'true'}
+          onChange={e => setConfig(p => ({ ...p, use_tls: e.target.value === 'true' }))}
+          className="w-full">
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+    </div>
+  )
+  if (type === 'telegram') return (
+    <div className="grid grid-cols-2 gap-3">
+      {f('bot_token', '123456:ABC-DEF...', 'Bot Token', true)}
+      {f('chat_id', '-100123456789', 'Chat ID')}
+    </div>
+  )
+  return (
+    <div>
+      {f('webhook_url', 'https://hooks.slack.com/...', 'Webhook URL')}
+    </div>
+  )
+}
+
+function NotificationsTab({ t }) {
+  const [channels, setChannels]   = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [showForm, setShowForm]   = useState(false)
+  const [editing, setEditing]     = useState(null)
+  const [testing, setTesting]     = useState(null)
+  const [testResult, setTestResult] = useState({})
+  const [saving, setSaving]       = useState(false)
+  const [form, setForm]           = useState({ name: '', type: 'email', config: {}, enabled: true, min_severity: 'HIGH' })
+  const [error, setError]         = useState('')
+
+  const token = () => localStorage.getItem('token')
+  const authH = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' })
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const r = await fetch('/api/notifications', { headers: authH() })
+      setChannels(await r.json())
+    } catch {}
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  const openNew = () => {
+    setEditing(null)
+    setForm({ name: '', type: 'email', config: {}, enabled: true, min_severity: 'HIGH' })
+    setError('')
+    setShowForm(true)
+  }
+
+  const openEdit = (ch) => {
+    setEditing(ch.id)
+    setForm({ name: ch.name, type: ch.type, config: { ...ch.config }, enabled: ch.enabled, min_severity: ch.min_severity })
+    setError('')
+    setShowForm(true)
+  }
+
+  const save = async () => {
+    if (!form.name.trim()) { setError('Name is required'); return }
+    setSaving(true)
+    setError('')
+    try {
+      const url    = editing ? `/api/notifications/${editing}` : '/api/notifications'
+      const method = editing ? 'PUT' : 'POST'
+      const r = await fetch(url, { method, headers: authH(), body: JSON.stringify(form) })
+      if (!r.ok) {
+        const e = await r.json()
+        setError(e.detail || 'Save failed')
+      } else {
+        setShowForm(false)
+        await load()
+      }
+    } catch (e) { setError(String(e)) }
+    setSaving(false)
+  }
+
+  const del = async (id) => {
+    if (!confirm('Delete this channel?')) return
+    await fetch(`/api/notifications/${id}`, { method: 'DELETE', headers: authH() })
+    await load()
+  }
+
+  const testChannel = async (id) => {
+    setTesting(id)
+    setTestResult(p => ({ ...p, [id]: null }))
+    try {
+      const r = await fetch(`/api/notifications/${id}/test`, { method: 'POST', headers: authH() })
+      const d = await r.json()
+      setTestResult(p => ({ ...p, [id]: d }))
+    } catch (e) {
+      setTestResult(p => ({ ...p, [id]: { success: false, message: String(e) } }))
+    }
+    setTesting(null)
+  }
+
+  const toggleEnabled = async (ch) => {
+    await fetch(`/api/notifications/${ch.id}`, {
+      method: 'PUT',
+      headers: authH(),
+      body: JSON.stringify({ ...ch, enabled: !ch.enabled }),
+    })
+    await load()
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-base font-black text-white">Notification Channels</h3>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            Alert notifications via Email, Telegram, Slack, Discord or Webhook
+          </p>
+        </div>
+        <Btn onClick={openNew} variant="primary">+ Add Channel</Btn>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 py-8" style={{ color: 'var(--text-muted)' }}>
+          <Spinner /><span className="text-sm">Loading...</span>
+        </div>
+      ) : channels.length === 0 ? (
+        <div className="text-center py-12 rounded-2xl"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+          <div className="text-4xl mb-3">🔔</div>
+          <p className="text-sm font-semibold text-white mb-1">No channels configured</p>
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+            Add a channel to receive alert notifications
+          </p>
+          <Btn onClick={openNew}>Add First Channel</Btn>
+        </div>
+      ) : (
         <div className="space-y-3">
-          {[
-            { label: t('settings.emailNotif'),    desc: t('settings.emailNotifDesc'),  icon: '📧' },
-            { label: t('settings.webhookAlerts'), desc: t('settings.webhookDesc'),     icon: '🔗' },
-          ].map(({ label, desc, icon }) => (
-            <div key={label} className="flex items-center justify-between p-3.5 rounded-xl"
-              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-              <div className="flex items-center gap-3">
-                <span className="text-lg">{icon}</span>
-                <div>
-                  <p className="text-xs font-bold text-white">{label}</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+          {channels.map(ch => {
+            const ct = CHANNEL_TYPES.find(c => c.id === ch.type) || CHANNEL_TYPES[0]
+            const tr = testResult[ch.id]
+            return (
+              <div key={ch.id} className="rounded-2xl p-4"
+                style={{ background: 'var(--bg-card)', border: `1px solid ${ch.enabled ? ct.color + '30' : 'var(--border-color)'}` }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                    style={{ background: `${ct.color}15` }}>{ct.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-white">{ch.name}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full"
+                        style={{ background: `${ct.color}15`, color: ct.color }}>{ct.label}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full"
+                        style={{ background: `${SEV_COLORS_N[ch.min_severity] || '#6b7280'}15`,
+                          color: SEV_COLORS_N[ch.min_severity] || '#6b7280' }}>
+                        ≥ {ch.min_severity}
+                      </span>
+                    </div>
+                    {tr && (
+                      <p className="text-xs mt-1" style={{ color: tr.success ? '#6ee7b7' : '#f87171' }}>
+                        {tr.success ? '✓ Test sent successfully' : `✗ ${tr.message}`}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={() => toggleEnabled(ch)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                      style={{ background: ch.enabled ? 'rgba(16,185,129,0.12)' : 'rgba(107,114,128,0.1)',
+                        color: ch.enabled ? '#6ee7b7' : '#9ca3af',
+                        border: `1px solid ${ch.enabled ? 'rgba(16,185,129,0.3)' : 'rgba(107,114,128,0.2)'}` }}>
+                      {ch.enabled ? 'ON' : 'OFF'}
+                    </button>
+                    <Btn small variant="ghost" onClick={() => testChannel(ch.id)}
+                      disabled={testing === ch.id}>
+                      {testing === ch.id ? '...' : 'Test'}
+                    </Btn>
+                    <Btn small variant="ghost" onClick={() => openEdit(ch)}>Edit</Btn>
+                    <Btn small variant="danger" onClick={() => del(ch.id)}>Del</Btn>
+                  </div>
                 </div>
               </div>
-              <div className="px-2.5 py-1 rounded-full text-xs font-bold"
-                style={{ background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.2)' }}>
-                Soon
+            )
+          })}
+        </div>
+      )}
+
+      {/* Add/Edit Form Modal */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)' }}>
+          <div className="w-full max-w-lg rounded-2xl p-6 space-y-4"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+            <h3 className="text-lg font-black text-white">
+              {editing ? 'Edit Channel' : 'Add Notification Channel'}
+            </h3>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Name</Label>
+                <input value={form.name} placeholder="My Slack Channel"
+                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full" />
+              </div>
+              <div>
+                <Label>Type</Label>
+                <select value={form.type}
+                  onChange={e => setForm(p => ({ ...p, type: e.target.value, config: {} }))}
+                  className="w-full">
+                  {CHANNEL_TYPES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label>Min Severity</Label>
+                <select value={form.min_severity}
+                  onChange={e => setForm(p => ({ ...p, min_severity: e.target.value }))}
+                  className="w-full">
+                  {SEV_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label>Enabled</Label>
+                <select value={form.enabled ? 'true' : 'false'}
+                  onChange={e => setForm(p => ({ ...p, enabled: e.target.value === 'true' }))}
+                  className="w-full">
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
               </div>
             </div>
-          ))}
+
+            <div>
+              <Label>Configuration</Label>
+              <div className="rounded-xl p-4 space-y-3"
+                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                <ChannelConfigFields type={form.type} config={form.config}
+                  setConfig={cfg => setForm(p => ({ ...p, config: typeof cfg === 'function' ? cfg(p.config) : cfg }))} />
+              </div>
+            </div>
+
+            {error && <Alert type="error">{error}</Alert>}
+
+            <div className="flex gap-3 justify-end">
+              <Btn variant="ghost" onClick={() => setShowForm(false)}>Cancel</Btn>
+              <Btn variant="primary" onClick={save} disabled={saving}>
+                {saving ? 'Saving...' : editing ? 'Save Changes' : 'Add Channel'}
+              </Btn>
+            </div>
+          </div>
         </div>
-      </SectionCard>
+      )}
     </div>
   )
 }
@@ -1313,11 +1582,12 @@ export default function Settings() {
           </div>
 
           {/* Tab content */}
-          {activeTab === 'profile'    && <ProfileTab user={user} t={t} />}
-          {activeTab === 'security'   && <SecurityTab t={t} user={user} onUpdated={refreshUser} />}
-          {activeTab === 'appearance' && <AppearanceTab t={t} lang={lang} toggle={toggleLang} theme={theme} toggleTheme={toggleTheme} />}
-          {activeTab === 'users'      && <UsersTab t={t} currentUserId={user?.id} />}
-          {activeTab === 'system'     && <SystemTab t={t} isAdmin={user?.role === 'admin'} />}
+          {activeTab === 'profile'       && <ProfileTab user={user} t={t} />}
+          {activeTab === 'security'      && <SecurityTab t={t} user={user} onUpdated={refreshUser} />}
+          {activeTab === 'appearance'    && <AppearanceTab t={t} lang={lang} toggle={toggleLang} theme={theme} toggleTheme={toggleTheme} />}
+          {activeTab === 'users'         && <UsersTab t={t} currentUserId={user?.id} />}
+          {activeTab === 'system'        && <SystemTab t={t} isAdmin={user?.role === 'admin'} />}
+          {activeTab === 'notifications' && <NotificationsTab t={t} />}
         </div>
       </div>
     </div>

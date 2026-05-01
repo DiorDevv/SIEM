@@ -22,6 +22,21 @@ function AgentAvatar({ hostname, online }) {
   )
 }
 
+function OsBadge({ os }) {
+  const s = (os || '').toLowerCase()
+  const isMac  = s.includes('darwin') || s.includes('mac')
+  const isWin  = s.includes('windows') || s.includes('win')
+  const icon   = isMac ? '🍎' : isWin ? '🪟' : '🐧'
+  const color  = isMac ? '#a78bfa' : isWin ? '#3b82f6' : '#f97316'
+  const bg     = isMac ? 'rgba(167,139,250,0.12)' : isWin ? 'rgba(59,130,246,0.12)' : 'rgba(249,115,22,0.12)'
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded"
+      style={{ background: bg, color, border: `1px solid ${color}30` }}>
+      {icon} {os || '—'}
+    </span>
+  )
+}
+
 /* ── Agent detail modal ──────────────────────────────────── */
 function AgentModal({ agent, onClose }) {
   const { t } = useLang()
@@ -370,15 +385,14 @@ export default function Agents() {
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  {[
-                    [t('agents.os'), agent.os || '—'],
-                    [t('agents.version'), agent.agent_version || '—'],
-                  ].map(([k, v]) => (
-                    <div key={k} className="rounded-lg p-2" style={{ background: 'var(--bg-secondary)' }}>
-                      <div style={{ color: 'var(--text-muted)' }}>{k}</div>
-                      <div className="font-medium text-white mt-0.5">{v}</div>
-                    </div>
-                  ))}
+                  <div className="rounded-lg p-2" style={{ background: 'var(--bg-secondary)' }}>
+                    <div style={{ color: 'var(--text-muted)' }}>{t('agents.os')}</div>
+                    <div className="mt-0.5"><OsBadge os={agent.os} /></div>
+                  </div>
+                  <div className="rounded-lg p-2" style={{ background: 'var(--bg-secondary)' }}>
+                    <div style={{ color: 'var(--text-muted)' }}>{t('agents.version')}</div>
+                    <div className="font-medium text-white mt-0.5">{agent.agent_version || '—'}</div>
+                  </div>
                 </div>
                 <div className="flex items-center justify-between mt-3 pt-3"
                   style={{ borderTop: '1px solid var(--border-color)' }}>
@@ -420,7 +434,7 @@ export default function Agents() {
                       </div>
                     </td>
                     <td className="px-5 py-3.5 font-mono text-xs" style={{ color: '#93c5fd' }}>{agent.ip_address}</td>
-                    <td className="px-5 py-3.5 text-sm" style={{ color: 'var(--text-secondary)' }}>{agent.os || '—'}</td>
+                    <td className="px-5 py-3.5"><OsBadge os={agent.os} /></td>
                     <td className="px-5 py-3.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{agent.agent_version || '—'}</td>
                     <td className="px-5 py-3.5">
                       <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full"

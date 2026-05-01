@@ -1,7 +1,9 @@
 """
-Real-time File Integrity Monitor — Linux inotify via ctypes.
-No external dependencies. Detects file changes in milliseconds.
-Runs as a daemon thread; puts events into a shared Queue.
+Real-time File Integrity Monitor.
+  Linux:   inotify via ctypes (no extra deps)
+  Windows: ReadDirectoryChangesW via watchdog library
+  macOS:   FSEvents via watchdog library
+Puts events into a shared Queue for the main agent loop.
 """
 import os
 import struct
@@ -159,8 +161,83 @@ class RealtimeFIM:
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self) -> bool:
+        import sys
+        if sys.platform == 'win32' or sys.platform == 'darwin':
+            return self._start_watchdog()
+        return self._start_inotify()
+
+    def _start_watchdog(self) -> bool:
+        """Windows/macOS: use watchdog for ReadDirectoryChangesW / FSEvents."""
+        try:
+            from watchdog.observers import Observer
+            from watchdog.events import FileSystemEventHandler
+
+            queue_ref = self._queue
+            severity_map  = _SEVERITY
+            etype_map     = _EVENT_TYPE
+
+            class _Handler(FileSystemEventHandler):
+                def _emit(self, event_type: str, path: str, is_dir: bool):
+                    flag     = event_type.upper()
+                    severity = severity_map.get(flag, 'WARNING')
+                    etype    = etype_map.get(flag, 'fim_changed')
+                    msg      = f"FIM [{flag}] {'dir' if is_dir else 'file'}: {path}"
+                    entry = {
+                        'timestamp':     datetime.now(timezone.utc).isoformat(),
+                        'level':         severity,
+                        'source':        'fim_realtime',
+                        'message':       msg,
+                        'raw':           msg,
+                        'parsed_fields': {
+                            'event_type': etype,
+                            'file_path':  path,
+                            'flags':      [flag],
+                            'is_dir':     is_dir,
+                        },
+                    }
+                    try:
+                        from queue import Full
+                        queue_ref.put_nowait(entry)
+                    except Full:
+                        pass
+
+                def on_created(self, e):   self._emit('CREATE',      e.src_path, e.is_directory)
+                def on_modified(self, e):  self._emit('MODIFY',      e.src_path, e.is_directory)
+                def on_deleted(self, e):   self._emit('DELETE',      e.src_path, e.is_directory)
+                def on_moved(self, e):     self._emit('MOVED_FROM',  e.src_path, e.is_directory)
+
+            observer = Observer()
+            dirs_watched = set()
+            for path in self._paths:
+                path = os.path.realpath(path)
+                watch_dir = path if os.path.isdir(path) else os.path.dirname(path)
+                if watch_dir not in dirs_watched and os.path.isdir(watch_dir):
+                    observer.schedule(_Handler(), watch_dir, recursive=False)
+                    dirs_watched.add(watch_dir)
+
+            if not dirs_watched:
+                return False
+
+            observer.start()
+            self._watchdog_observer = observer
+            self._thread = observer
+
+            import sys as _sys
+            platform_name = 'Windows (ReadDirectoryChangesW)' if _sys.platform == 'win32' else 'macOS (FSEvents)'
+            logger.info(f"FIM-RT: {platform_name} watching {len(dirs_watched)} dir(s)")
+            return True
+
+        except ImportError:
+            logger.warning("FIM-RT: watchdog not installed — real-time FIM disabled on Windows/macOS")
+            logger.warning("FIM-RT: install with:  pip install watchdog")
+            return False
+        except Exception as e:
+            logger.warning(f"FIM-RT: watchdog init failed: {e}")
+            return False
+
+    def _start_inotify(self) -> bool:
+        """Linux: use inotify via ctypes."""
         if os.name != 'posix':
-            logger.info("FIM-RT: inotify not available on non-Linux")
             return False
         try:
             self._ino = _Inotify()
@@ -187,10 +264,20 @@ class RealtimeFIM:
         self._stop.set()
         if self._ino:
             self._ino.close()
+        # Stop watchdog observer if used (Windows/macOS)
+        observer = getattr(self, '_watchdog_observer', None)
+        if observer:
+            try:
+                observer.stop()
+                observer.join(timeout=3)
+            except Exception:
+                pass
 
     # ── registration ──────────────────────────────────────────────────────────
 
     def _register(self, path: str):
+        if self._ino is None:
+            return
         path = os.path.realpath(path)
         if os.path.isdir(path):
             watch_dir   = path

@@ -1,32 +1,143 @@
-manager_url: http://localhost:8000
-agent_name: my-agent
-check_interval: 60
-heartbeat_interval: 30
+manager_url: http://84.8.147.84:8080
+agent_name: diyor-noutbok
+
+# ── Collection intervals (seconds) ────────────────────────────────────────────
+check_interval:       60     # log files, auditd, journald
+heartbeat_interval:   30     # server keepalive + AR polling
+fim_interval:         300    # periodic FIM (5 min)
+rootcheck_interval:   3600   # rootkit scan (1 hour)
+process_interval:     30     # new processes + connections
+vuln_interval:        3600   # package vulnerability scan
+sca_interval:         3600   # security config assessment
+inventory_interval:   3600   # hardware/software inventory (delta)
+
+# ── Log collection ─────────────────────────────────────────────────────────────
+batch_size: 100
 
 log_paths:
   - /var/log/syslog
   - /var/log/auth.log
   - /var/log/kern.log
   - /var/log/messages
+  - /var/log/nginx/access.log
+  - /var/log/nginx/error.log
 
+# ── File Integrity Monitor ─────────────────────────────────────────────────────
 fim_paths:
   - /etc/passwd
   - /etc/shadow
   - /etc/hosts
   - /etc/crontab
   - /etc/sudoers
+  - /etc/ssh/sshd_config
 
-fim_interval: 300
+fim_realtime_paths:
+  - /etc
+  - /usr/bin
+  - /usr/sbin
+  - /bin
+  - /sbin
 
-vuln_interval: 3600
-sca_interval: 3600
-windows_events_max: 500
-
+# ── Windows Event Log ──────────────────────────────────────────────────────────
 windows_event_logs:
   - Security
   - System
   - Application
+  - Microsoft-Windows-PowerShell/Operational
+  - Microsoft-Windows-Sysmon/Operational
+windows_events_max: 500
 
-batch_size: 100
+# ── Windows Real-time FIM paths ───────────────────────────────────────────────
+# Paths monitored via ReadDirectoryChangesW (watchdog) on Windows.
+windows_fim_realtime_paths:
+  - C:\Windows\System32
+  - C:\Windows\System32\drivers\etc
+  - C:\Users
+  - C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup
+
+# ── Windows Registry FIM ───────────────────────────────────────────────────────
+# How often to compare registry keys against baseline (seconds).
+registry_fim_interval: 120
+
+# ── Windows Service Monitor ────────────────────────────────────────────────────
+# How often to compare services against baseline (seconds).
+service_monitor_interval: 120
+
+# ── Offline buffer ─────────────────────────────────────────────────────────────
+# When the server is unreachable, logs are saved to buffer.db (SQLite + gzip).
+# They are automatically drained when the server comes back online.
+buffer_max_batches:   2000    # max queued batches (~200k logs at batch_size=100)
+buffer_ttl_hours:     48      # drop buffered logs older than 48h
+buffer_drain_interval: 30     # seconds between drain attempts
+
+# ── Noise filter ───────────────────────────────────────────────────────────────
+# Drop matching log entries BEFORE sending to reduce bandwidth + alert noise.
+# All checks are case-insensitive for message_contains.
+exclusions:
+  # Drop log lines whose message contains any of these strings
+  message_contains:
+    - "CRON"
+    - "systemd-tmpfiles"
+    - "audit: type=1107"      # AppArmor allowed events (very noisy)
+    - "dbus-daemon"
+    - "NetworkManager"        # Remove if you want network change events
+
+  # Drop logs from these file sources (matched by suffix)
+  source_ends_with:
+    - "/dpkg.log"             # package manager noise
+    - "/apt/history.log"
+
+  # Drop entire event_type categories (uncomment to activate)
+  event_types: []
+    # - "system_metrics"      # uncomment to stop sending CPU/MEM metrics
+
+  # Drop by log level
+  log_levels: []
+    # - "DEBUG"
+
+# ── Deduplication ─────────────────────────────────────────────────────────────
+# Drop duplicate INFO/WARNING events seen within this window (seconds).
+# 0 = disabled. CRITICAL/ERROR always pass through regardless.
+dedup_window: 60
+
+# ── GeoIP enrichment ──────────────────────────────────────────────────────────
+# Adds country/city/ASN to events with public IPs via ip-api.com.
+# Disable if the agent has no internet access or strict privacy requirements.
+geoip_enabled: false
+
+# ── Docker / Kubernetes ────────────────────────────────────────────────────────
+# docker_interval: how often to poll Docker events + container logs (seconds)
+docker_interval: 60
+
+docker:
+  events: true      # Docker daemon lifecycle events
+  logs:   true      # Container stdout/stderr (last 200 lines per cycle)
+
+kubernetes:
+  enabled:    false  # Set true if running inside a K8s cluster or with kubectl
+  namespace:  default
+  max_pods:   30
+  tail_lines: 100
+
+# ── DNS Monitor ───────────────────────────────────────────────────────────────
+# Detects DGA domains, DNS tunneling, suspicious TLDs, and query floods.
+# Parses syslog (Linux), DNS-Client event log (Windows), unified log (macOS).
+dns_monitor_interval: 60
+
+# ── Threat Intelligence ────────────────────────────────────────────────────────
+# Auto-downloads Firehol Level 1 and Emerging Threats IP blocklists (daily).
+# Enriches every log event that contains a public IP matching the blocklist.
+threat_intel:
+  enabled: false              # Set true to activate (requires internet access)
+  blocklist_path: ""          # Optional local blocklist file (one IP/CIDR per line)
+  abuseipdb_key: ""           # Optional AbuseIPDB API key for on-demand checks
+
+# ── Correlation Engine ─────────────────────────────────────────────────────────
+# Always active — no configuration needed.
+# Generates composite alerts for multi-stage attack patterns:
+#   - SSH brute force, login after brute, port scan → exploit
+#   - Privilege escalation → persistence, credential dump → lateral movement
+#   - Modified file → executed, multiple CRITICAL indicators from same source
+
+# ── Agent logging ──────────────────────────────────────────────────────────────
 log_level: INFO
-agent_id_file: .agent_id

@@ -74,6 +74,17 @@ _SU_RE = re.compile(r"su:\s+(?:session opened|session closed|authentication fail
 _CRON_RE = re.compile(r'CRON\[\d+\]:.*?(?:CMD|session opened|session closed)')
 
 
+# ── MITRE ATT&CK technique map for syslog events ─────────────────────────────
+_SYSLOG_MITRE: Dict[str, str] = {
+    'ssh_failed':       'T1110',      # Brute Force
+    'ssh_invalid_user': 'T1110.001',  # Password Guessing
+    'ssh_accepted':     'T1078',      # Valid Accounts
+    'sudo_command':     'T1548.003',  # Abuse Elevation: Sudo
+    'firewall_block':   'T1562.004',  # Impair Defenses: Disable or Modify System Firewall
+    'oom_kill':         'T1499',      # Endpoint Denial of Service
+}
+
+
 def _parse_syslog(line: str) -> Dict[str, Any]:
     fields: Dict[str, Any] = {}
 
@@ -97,57 +108,66 @@ def _parse_syslog(line: str) -> Dict[str, Any]:
     sm = _SSH_FAIL_RE.search(line)
     if sm:
         fields.update({
-            'event_type': 'ssh_failed',
-            'ssh_user':   sm.group(1),
-            'ssh_src_ip': sm.group(2),
-            'ssh_port':   sm.group(3),
+            'event_type':       'ssh_failed',
+            'ssh_user':         sm.group(1),
+            'ssh_src_ip':       sm.group(2),
+            'src_ip':           sm.group(2),
+            'ssh_port':         sm.group(3),
+            'mitre_technique':  _SYSLOG_MITRE['ssh_failed'],
         })
 
     sm = _SSH_ACCEPT_RE.search(line)
     if sm:
         fields.update({
-            'event_type':  'ssh_accepted',
-            'ssh_method':  sm.group(1),
-            'ssh_user':    sm.group(2),
-            'ssh_src_ip':  sm.group(3),
-            'ssh_port':    sm.group(4),
+            'event_type':       'ssh_accepted',
+            'ssh_method':       sm.group(1),
+            'ssh_user':         sm.group(2),
+            'ssh_src_ip':       sm.group(3),
+            'src_ip':           sm.group(3),
+            'ssh_port':         sm.group(4),
+            'mitre_technique':  _SYSLOG_MITRE['ssh_accepted'],
         })
 
     sm = _SSH_INVALID_RE.search(line)
     if sm:
         fields.update({
-            'event_type': 'ssh_invalid_user',
-            'ssh_user':   sm.group(1),
-            'ssh_src_ip': sm.group(2),
+            'event_type':       'ssh_invalid_user',
+            'ssh_user':         sm.group(1),
+            'ssh_src_ip':       sm.group(2),
+            'src_ip':           sm.group(2),
+            'mitre_technique':  _SYSLOG_MITRE['ssh_invalid_user'],
         })
 
     # Sudo
     sm = _SUDO_RE.search(line)
     if sm:
         fields.update({
-            'event_type': 'sudo_command',
-            'sudo_user':  sm.group('user'),
-            'sudo_cmd':   sm.group('cmd').strip(),
+            'event_type':       'sudo_command',
+            'sudo_user':        sm.group('user'),
+            'sudo_cmd':         sm.group('cmd').strip(),
+            'mitre_technique':  _SYSLOG_MITRE['sudo_command'],
         })
 
     # UFW
     sm = _UFW_RE.search(line)
     if sm:
         fields.update({
-            'event_type':   'firewall_block',
-            'fw_action':    sm.group('action'),
-            'src_ip':       sm.group('src'),
-            'dst_ip':       sm.group('dst'),
-            'protocol':     sm.group('proto'),
+            'event_type':       'firewall_block',
+            'fw_action':        sm.group('action'),
+            'src_ip':           sm.group('src'),
+            'dst_ip':           sm.group('dst'),
+            'protocol':         sm.group('proto'),
+            'mitre_technique':  _SYSLOG_MITRE['firewall_block'],
         })
 
     # OOM
     sm = _OOM_RE.search(line)
     if sm:
         fields.update({
-            'event_type': 'oom_kill',
-            'oom_pid':    sm.group(1),
-            'oom_proc':   sm.group(2),
+            'event_type':       'oom_kill',
+            'oom_pid':          sm.group(1),
+            'oom_proc':         sm.group(2),
+            'mitre_technique':  _SYSLOG_MITRE['oom_kill'],
         })
 
     return fields
@@ -189,7 +209,8 @@ class PositionTracker:
     """Persist read positions per log file to avoid duplicate entries."""
 
     def __init__(self, state_file: str = '.log_positions'):
-        self._file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', state_file)
+        from collectors._paths import data_path as _dp
+        self._file = _dp(state_file)
         self._pos: Dict[str, int] = {}
         self._inodes: Dict[str, int] = {}
         self._load()

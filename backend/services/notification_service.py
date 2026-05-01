@@ -185,3 +185,139 @@ async def send_slack_alert(alert):
                     logger.info(f"Slack alert sent: {getattr(alert,'title','')}")
     except Exception as e:
         logger.error(f"Slack send failed: {e}")
+
+
+# ── Telegram ──────────────────────────────────────────────────────────────────
+
+async def send_telegram_alert(alert, bot_token: str, chat_id: str):
+    sev   = str(getattr(alert, "severity", "")).upper()
+    emoji = _severity_emoji(sev)
+    title = getattr(alert, "title", "Alert")
+    agent = getattr(alert, "agent_hostname", "unknown")
+    src   = getattr(alert, "src_ip", "") or "—"
+    tactic = getattr(alert, "mitre_tactic", "") or "—"
+
+    text = (
+        f"{emoji} *\\[{sev}\\] {title}*\n"
+        f"Agent: `{agent}`  |  IP: `{src}`\n"
+        f"MITRE: {tactic}\n"
+        f"Rule: {getattr(alert, 'rule_name', '') or '—'}"
+    )
+
+    import httpx
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, json={
+                "chat_id": chat_id, "text": text, "parse_mode": "MarkdownV2"
+            })
+            if r.status_code != 200:
+                logger.error(f"Telegram {r.status_code}: {r.text[:200]}")
+            else:
+                logger.info(f"Telegram alert sent: {title}")
+    except Exception as e:
+        logger.error(f"Telegram send failed: {e}")
+
+
+# ── Generic webhook ───────────────────────────────────────────────────────────
+
+async def send_webhook_alert(alert, webhook_url: str):
+    sev = str(getattr(alert, "severity", "")).upper()
+    import httpx, time
+    payload = {
+        "severity":     sev,
+        "title":        getattr(alert, "title", ""),
+        "agent":        getattr(alert, "agent_hostname", ""),
+        "src_ip":       getattr(alert, "src_ip", ""),
+        "mitre_tactic": getattr(alert, "mitre_tactic", ""),
+        "rule_name":    getattr(alert, "rule_name", ""),
+        "alert_id":     getattr(alert, "id", None),
+        "timestamp":    time.time(),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(webhook_url, json=payload)
+            if r.status_code not in (200, 201, 204):
+                logger.error(f"Webhook {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        logger.error(f"Webhook send failed: {e}")
+
+
+# ── DB-backed channel dispatch ────────────────────────────────────────────────
+
+_SEV_ORDER = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+
+
+async def notify_alert_channels(db, alert) -> None:
+    """
+    Dispatch alert to all enabled DB-backed notification channels
+    if alert severity >= channel.min_severity.
+    Called from rule_engine after alert upsert.
+    """
+    try:
+        from sqlalchemy import select
+        from models.notification import NotificationChannel
+
+        channels = (await db.execute(
+            select(NotificationChannel).where(NotificationChannel.enabled == True)
+        )).scalars().all()
+
+        if not channels:
+            return
+
+        sev = str(getattr(alert, "severity", "LOW")).upper().replace("ALERTSEVERITY.", "")
+        sev_val = _SEV_ORDER.get(sev, 0)
+
+        for ch in channels:
+            min_sev = (ch.min_severity or "HIGH").upper()
+            if sev_val < _SEV_ORDER.get(min_sev, 2):
+                continue
+            cfg = ch.config or {}
+            try:
+                if ch.type == "email":
+                    # Reuse existing send_alert_email but with channel config
+                    await _send_channel_email(alert, cfg)
+                elif ch.type == "telegram":
+                    await send_telegram_alert(alert, cfg.get("bot_token", ""), cfg.get("chat_id", ""))
+                elif ch.type in ("slack", "discord", "webhook"):
+                    url = cfg.get("webhook_url", "")
+                    if url:
+                        await send_webhook_alert(alert, url)
+            except Exception as exc:
+                logger.error(f"Channel {ch.name} ({ch.type}) dispatch error: {exc}")
+    except Exception as e:
+        logger.error(f"notify_alert_channels failed: {e}")
+
+
+async def _send_channel_email(alert, cfg: dict):
+    """Send email using per-channel SMTP config."""
+    host     = cfg.get("smtp_host", settings.SMTP_HOST)
+    port     = int(cfg.get("smtp_port", settings.SMTP_PORT))
+    username = cfg.get("smtp_user", settings.SMTP_USERNAME)
+    password = cfg.get("smtp_password", settings.SMTP_PASSWORD)
+    to       = cfg.get("to_email", settings.SMTP_TO)
+    use_tls  = cfg.get("use_tls", settings.SMTP_USE_TLS)
+
+    if not (host and to):
+        return
+
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    import aiosmtplib
+
+    sev   = str(getattr(alert, "severity", "")).upper()
+    emoji = _severity_emoji(sev)
+    title = getattr(alert, "title", "Alert")
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"{emoji} [{sev}] {title} — SecureWatch SIEM"
+    msg["From"]    = username or f"siem@{host}"
+    msg["To"]      = to
+    msg.attach(MIMEText(_build_email_html(alert), "html"))
+
+    await aiosmtplib.send(
+        msg,
+        hostname=host, port=port,
+        username=username or None, password=password or None,
+        start_tls=use_tls,
+    )
