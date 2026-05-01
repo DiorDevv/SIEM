@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +9,14 @@ from database import get_db
 from models.agent import Agent, AgentStatus
 from routes.auth import get_current_user
 from models.user import User
+from config import settings
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+
+def verify_agent_secret(x_agent_token: Optional[str] = Header(None)):
+    if settings.AGENT_SECRET and x_agent_token != settings.AGENT_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid agent secret")
 
 
 class AgentRegisterRequest(BaseModel):
@@ -33,7 +39,7 @@ class HeartbeatRequest(BaseModel):
 
 
 @router.post("/register")
-async def register_agent(request: AgentRegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register_agent(request: AgentRegisterRequest, db: AsyncSession = Depends(get_db), _: None = Depends(verify_agent_secret)):
     stmt = select(Agent).where(Agent.hostname == request.hostname, Agent.ip_address == request.ip_address)
     result = await db.execute(stmt)
     existing = result.scalar_one_or_none()

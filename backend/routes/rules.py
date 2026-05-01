@@ -1,4 +1,5 @@
-from typing import Optional
+import re
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -133,6 +134,44 @@ async def update_rule(
     await db.refresh(rule)
     await audit(db, current_user, "update_rule", "rule", rule.id, rule.name)
     return _rule_to_dict(rule)
+
+
+class RuleTestRequest(BaseModel):
+    sample_logs: List[str]
+
+
+@router.post("/{rule_id}/test")
+async def test_rule(
+    rule_id: int,
+    body: RuleTestRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    stmt = select(Rule).where(Rule.id == rule_id)
+    rule = (await db.execute(stmt)).scalar_one_or_none()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    if not rule.pattern:
+        raise HTTPException(status_code=400, detail="Rule has no pattern to test")
+
+    results = []
+    for log in body.sample_logs:
+        try:
+            matched = bool(re.search(rule.pattern, log, re.IGNORECASE))
+        except re.error as e:
+            raise HTTPException(status_code=400, detail=f"Invalid pattern: {e}")
+        results.append({"log": log, "matched": matched})
+
+    matched_count = sum(1 for r in results if r["matched"])
+    return {
+        "rule_id": rule_id,
+        "rule_name": rule.name,
+        "pattern": rule.pattern,
+        "severity": rule.severity,
+        "total": len(results),
+        "matched": matched_count,
+        "results": results,
+    }
 
 
 @router.delete("/{rule_id}")

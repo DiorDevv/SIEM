@@ -94,6 +94,7 @@ export const getRules = () => api.get('/api/rules')
 export const createRule = (data) => api.post('/api/rules', data)
 export const updateRule = (id, data) => api.put(`/api/rules/${id}`, data)
 export const deleteRule = (id) => api.delete(`/api/rules/${id}`)
+export const testRule = (id, sampleLogs) => api.post(`/api/rules/${id}/test`, { sample_logs: sampleLogs })
 
 // Active Response
 export const getARPolicies       = (params)    => api.get('/api/ar/policies', { params })

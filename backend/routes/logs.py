@@ -1,10 +1,12 @@
 import csv
 import io
 import logging
+import time
+from collections import defaultdict
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -27,6 +29,21 @@ from routes.auth import get_current_user
 from models.user import User
 
 logger = logging.getLogger(__name__)
+
+# Simple in-memory rate limiter for log ingest (per agent_id)
+_ingest_buckets: dict = defaultdict(lambda: {"count": 0, "reset_at": 0})
+INGEST_LIMIT = 60   # max requests per minute per agent
+INGEST_WINDOW = 60  # seconds
+
+def check_ingest_rate(agent_id: str):
+    now = time.time()
+    bucket = _ingest_buckets[agent_id]
+    if now > bucket["reset_at"]:
+        bucket["count"] = 0
+        bucket["reset_at"] = now + INGEST_WINDOW
+    bucket["count"] += 1
+    if bucket["count"] > INGEST_LIMIT:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded — slow down log ingest")
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -93,6 +110,7 @@ async def ingest_logs(
     background_tasks: BackgroundTasks,
     db:               AsyncSession = Depends(get_db),
 ):
+    check_ingest_rate(request.agent_id)
     stmt = select(Agent).where(Agent.agent_id == request.agent_id, Agent.is_active == True)
     agent = (await db.execute(stmt)).scalar_one_or_none()
     if not agent:

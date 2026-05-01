@@ -1,6 +1,91 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { getRules, createRule, updateRule, deleteRule } from '../api'
+import { getRules, createRule, updateRule, deleteRule, testRule } from '../api'
 import { useLang } from '../context/LanguageContext'
+
+/* ── Rule Test Modal ──────────────────────────────────────── */
+function RuleTestModal({ rule, onClose }) {
+  const [logs, setLogs] = useState('May 1 10:23:01 server sshd[1234]: Failed password for root from 192.168.1.1 port 22 ssh2')
+  const [results, setResults] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const run = async () => {
+    setLoading(true); setError(null); setResults(null)
+    try {
+      const sampleLogs = logs.split('\n').map(l => l.trim()).filter(Boolean)
+      const res = await testRule(rule.id, sampleLogs)
+      setResults(res.data)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Xato yuz berdi')
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)' }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-2xl rounded-2xl overflow-hidden"
+        style={{ background: 'var(--bg-card)', border: '1px solid rgba(99,102,241,0.3)', boxShadow: '0 25px 80px rgba(0,0,0,0.7)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4"
+          style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+          <div>
+            <h2 className="text-base font-black text-white">Rule Test</h2>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{rule.name} — {rule.pattern}</p>
+          </div>
+          <button onClick={onClose} style={{ color: 'var(--text-muted)', background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>×</button>
+        </div>
+        {/* Body */}
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-bold mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              Log satrlarini kiriting (har qatori alohida)
+            </label>
+            <textarea
+              value={logs}
+              onChange={e => setLogs(e.target.value)}
+              rows={5}
+              className="w-full font-mono text-xs p-3 rounded-xl resize-none"
+              style={{ background: '#0d1117', border: '1px solid var(--border-color)', color: '#e2e8f0' }}
+              placeholder="Log satrlarini kiriting..."
+            />
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          {results && (
+            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-color)' }}>
+              <div className="flex items-center justify-between px-4 py-2" style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)' }}>
+                <span className="text-xs font-bold text-white">Natijalar</span>
+                <span className="text-xs" style={{ color: results.matched > 0 ? '#6ee7b7' : 'var(--text-muted)' }}>
+                  {results.matched}/{results.total} mos keldi
+                </span>
+              </div>
+              <div className="divide-y" style={{ borderColor: 'var(--border-color)', maxHeight: 200, overflowY: 'auto' }}>
+                {results.results.map((r, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-2.5"
+                    style={{ background: r.matched ? 'rgba(16,185,129,0.06)' : 'transparent' }}>
+                    <span style={{ fontSize: 14, flexShrink: 0 }}>{r.matched ? '✅' : '❌'}</span>
+                    <span className="font-mono text-xs" style={{ color: r.matched ? '#6ee7b7' : 'var(--text-muted)' }}>{r.log}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {/* Footer */}
+        <div className="flex justify-end gap-2 px-6 py-4" style={{ borderTop: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold"
+            style={{ background: 'var(--bg-card)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+            Yopish
+          </button>
+          <button onClick={run} disabled={loading} className="px-4 py-2 rounded-xl text-sm font-bold"
+            style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}>
+            {loading ? 'Tekshirilmoqda...' : '▶ Testni ishga tushir'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const SEV = {
   CRITICAL: { color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.3)' },
@@ -162,7 +247,7 @@ function RuleFormModal({ initial, onSave, onClose }) {
 }
 
 /* ── Rule card ────────────────────────────────────────────── */
-function RuleCard({ rule, onEdit, onToggle, onDelete, t }) {
+function RuleCard({ rule, onEdit, onToggle, onDelete, onTest, t }) {
   const sev = SEV[rule.severity] || SEV.MEDIUM
   return (
     <div className="rounded-2xl p-5 transition-all group"
@@ -223,6 +308,13 @@ function RuleCard({ rule, onEdit, onToggle, onDelete, t }) {
           ⏱ {rule.cooldown_seconds}s cooldown
         </span>
         <div className="flex gap-1.5">
+          {rule.pattern && (
+            <button onClick={() => onTest(rule)}
+              className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all"
+              style={{ background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.2)' }}>
+              ▶ Test
+            </button>
+          )}
           <button onClick={() => onEdit(rule)}
             className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all"
             style={{ background: 'rgba(59,130,246,0.1)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.2)' }}>
@@ -249,6 +341,7 @@ export default function Rules() {
   const [showCreate, setShowCreate] = useState(false)
   const [editRule, setEditRule]   = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [testRuleItem, setTestRuleItem] = useState(null)
   const [viewMode, setViewMode]   = useState('grid')
   const [search, setSearch]       = useState('')
 
@@ -383,7 +476,7 @@ export default function Rules() {
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((rule) => (
             <RuleCard key={rule.id} rule={rule} t={t}
-              onEdit={setEditRule} onToggle={handleToggle} onDelete={setConfirmDelete} />
+              onEdit={setEditRule} onToggle={handleToggle} onDelete={setConfirmDelete} onTest={setTestRuleItem} />
           ))}
         </div>
       ) : (
@@ -474,6 +567,7 @@ export default function Rules() {
 
       {showCreate && <RuleFormModal onSave={handleCreate} onClose={() => setShowCreate(false)} />}
       {editRule   && <RuleFormModal initial={editRule} onSave={handleEdit} onClose={() => setEditRule(null)} />}
+      {testRuleItem && <RuleTestModal rule={testRuleItem} onClose={() => setTestRuleItem(null)} />}
 
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
