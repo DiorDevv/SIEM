@@ -2,6 +2,7 @@ import React from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useLang } from '../context/LanguageContext'
+import { usePermission } from '../hooks/usePermission'
 
 const icons = {
   dashboard: (
@@ -115,26 +116,27 @@ export default function Sidebar({ open, onToggle }) {
   const { user, logout } = useAuth()
   const { t } = useLang()
   const navigate = useNavigate()
+  const { can } = usePermission()
 
-  const navItems = [
-    { to: '/',         key: 'dashboard', icon: icons.dashboard },
-    { to: '/agents',   key: 'agents',    icon: icons.agents },
-    { to: '/alerts',   key: 'alerts',    icon: icons.alerts },
-    { to: '/logs',     key: 'logs',      icon: icons.logs },
-    { to: '/rules',            key: 'rules',           icon: icons.rules },
-    { to: '/active-response',  key: 'activeResponse',   icon: icons.activeResponse },
-    { to: '/inventory',        key: 'inventory',        icon: icons.inventory },
-    { to: '/vulnerabilities',  key: 'vulnerabilities',  icon: icons.vulnerabilities },
-    { to: '/sca',              key: 'sca',              icon: icons.sca },
-    { to: '/reports',            key: 'reports',           icon: icons.reports },
-    { to: '/cases',              key: 'cases',             icon: icons.cases },
-    { to: '/threat-intel',       key: 'threatIntel',       icon: icons.threatIntel },
-    { to: '/correlation',        key: 'correlation',       icon: icons.correlation },
-    ...(user?.role === 'admin' ? [
-      { to: '/audit-log', key: 'auditLog', icon: icons.auditLog },
-    ] : []),
-    { to: '/settings',         key: 'settings',         icon: icons.settings },
+  const allNavItems = [
+    { to: '/',                key: 'dashboard',      icon: icons.dashboard,       minRole: 'viewer'  },
+    { to: '/agents',          key: 'agents',         icon: icons.agents,          minRole: 'analyst' },
+    { to: '/alerts',          key: 'alerts',         icon: icons.alerts,          minRole: 'viewer'  },
+    { to: '/logs',            key: 'logs',           icon: icons.logs,            minRole: 'viewer'  },
+    { to: '/rules',           key: 'rules',          icon: icons.rules,           minRole: 'analyst' },
+    { to: '/active-response', key: 'activeResponse', icon: icons.activeResponse,  minRole: 'analyst' },
+    { to: '/inventory',       key: 'inventory',      icon: icons.inventory,       minRole: 'viewer'  },
+    { to: '/vulnerabilities', key: 'vulnerabilities',icon: icons.vulnerabilities, minRole: 'viewer'  },
+    { to: '/sca',             key: 'sca',            icon: icons.sca,             minRole: 'viewer'  },
+    { to: '/reports',         key: 'reports',        icon: icons.reports,         minRole: 'viewer'  },
+    { to: '/cases',           key: 'cases',          icon: icons.cases,           minRole: 'viewer'  },
+    { to: '/threat-intel',    key: 'threatIntel',    icon: icons.threatIntel,     minRole: 'analyst' },
+    { to: '/correlation',     key: 'correlation',    icon: icons.correlation,     minRole: 'analyst' },
+    { to: '/audit-log',       key: 'auditLog',       icon: icons.auditLog,        minRole: 'admin'   },
+    { to: '/settings',        key: 'settings',       icon: icons.settings,        minRole: 'viewer'  },
   ]
+
+  const navItems = allNavItems.filter(item => can(item.minRole))
 
   return (
     <aside

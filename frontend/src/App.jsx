@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { usePermission } from './hooks/usePermission'
 import { LanguageProvider, useLang } from './context/LanguageContext'
 import { ThemeProvider } from './context/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -104,6 +105,12 @@ function ProtectedLayout({ children }) {
   )
 }
 
+function RoleRoute({ minRole, children }) {
+  const { can } = usePermission()
+  if (!can(minRole)) return <Navigate to="/" replace />
+  return children
+}
+
 function AppRoutes() {
   const { loading } = useAuth()
   if (loading) {
@@ -120,20 +127,22 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/"        element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
-      <Route path="/agents"  element={<ProtectedLayout><Agents /></ProtectedLayout>} />
       <Route path="/alerts"  element={<ProtectedLayout><Alerts /></ProtectedLayout>} />
       <Route path="/logs"    element={<ProtectedLayout><Logs /></ProtectedLayout>} />
-      <Route path="/rules"           element={<ProtectedLayout><Rules /></ProtectedLayout>} />
-      <Route path="/active-response"  element={<ProtectedLayout><ActiveResponse /></ProtectedLayout>} />
       <Route path="/vulnerabilities" element={<ProtectedLayout><Vulnerabilities /></ProtectedLayout>} />
       <Route path="/sca"             element={<ProtectedLayout><SCA /></ProtectedLayout>} />
       <Route path="/inventory"       element={<ProtectedLayout><Inventory /></ProtectedLayout>} />
-      <Route path="/audit-log"        element={<ProtectedLayout><AuditLog /></ProtectedLayout>} />
-      <Route path="/reports"          element={<ProtectedLayout><Reports /></ProtectedLayout>} />
-      <Route path="/cases"            element={<ProtectedLayout><Cases /></ProtectedLayout>} />
-      <Route path="/threat-intel"     element={<ProtectedLayout><ThreatIntel /></ProtectedLayout>} />
-      <Route path="/correlation"      element={<ProtectedLayout><CorrelationRules /></ProtectedLayout>} />
+      <Route path="/reports"         element={<ProtectedLayout><Reports /></ProtectedLayout>} />
+      <Route path="/cases"           element={<ProtectedLayout><Cases /></ProtectedLayout>} />
       <Route path="/settings"        element={<ProtectedLayout><Settings /></ProtectedLayout>} />
+      {/* analyst+ only */}
+      <Route path="/agents"          element={<ProtectedLayout><RoleRoute minRole="analyst"><Agents /></RoleRoute></ProtectedLayout>} />
+      <Route path="/rules"           element={<ProtectedLayout><RoleRoute minRole="analyst"><Rules /></RoleRoute></ProtectedLayout>} />
+      <Route path="/active-response" element={<ProtectedLayout><RoleRoute minRole="analyst"><ActiveResponse /></RoleRoute></ProtectedLayout>} />
+      <Route path="/threat-intel"    element={<ProtectedLayout><RoleRoute minRole="analyst"><ThreatIntel /></RoleRoute></ProtectedLayout>} />
+      <Route path="/correlation"     element={<ProtectedLayout><RoleRoute minRole="analyst"><CorrelationRules /></RoleRoute></ProtectedLayout>} />
+      {/* admin only */}
+      <Route path="/audit-log"       element={<ProtectedLayout><RoleRoute minRole="admin"><AuditLog /></RoleRoute></ProtectedLayout>} />
       <Route path="*"        element={<Navigate to="/" replace />} />
     </Routes>
   )
