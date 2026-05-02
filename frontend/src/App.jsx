@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { LanguageProvider, useLang } from './context/LanguageContext'
 import { ThemeProvider } from './context/ThemeContext'
+import ErrorBoundary from './components/ErrorBoundary'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Agents from './pages/Agents'
@@ -140,14 +141,18 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <ThemeProvider>
-        <LanguageProvider>
-          <AuthProvider>
-            <AppRoutes />
-          </AuthProvider>
-        </LanguageProvider>
-      </ThemeProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <ThemeProvider>
+          <LanguageProvider>
+            <AuthProvider>
+              <ErrorBoundary>
+                <AppRoutes />
+              </ErrorBoundary>
+            </AuthProvider>
+          </LanguageProvider>
+        </ThemeProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }

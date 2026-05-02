@@ -42,6 +42,9 @@ data/
 postgres_data/
 redis_data/
 
+# Nested git repos (separate projects)
+my-siem/
+
 # Agent runtime state files
 agent/.agent_id
 agent/.fim_state.json

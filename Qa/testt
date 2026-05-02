@@ -1,0 +1,479 @@
+
+  ┌──────────────────────────────────────────┬──────────┬───────────┐
+  │                 Feature                  │ Qiyinlik │   Vaqt    │
+  ├──────────────────────────────────────────┼──────────┼───────────┤
+  │ Dark/Light theme toggle                  │ Oson     │ 30 min    │
+  ├──────────────────────────────────────────┼──────────┼───────────┤
+  │ Dashboard MITRE heatmap                  │ O'rta    │ 1-2 soat  │
+  ├──────────────────────────────────────────┼──────────┼───────────┤
+  │ Agent installer script (bash/PowerShell) │ O'rta    │ 1 soat    │
+  ├──────────────────────────────────────────┼──────────┼───────────┤
+  │ 2FA (TOTP) login uchun                   │ Qiyin    │ 2-3 soat  │
+  ├──────────────────────────────────────────┼──────────┼───────────┤
+  │ Audit log (kim nima qildi)               │ O'rta    │ 1-2 soat  │
+  ├──────────────────────────────────────────┼──────────┼───────────┤
+  │ Real Elasticsearch integratsiya          │ Qiyin    │ yarım kun │
+  └──────────────────────────────────────────┴──────────┴───────────┘
+
+  ┌─────┬────────────────────────────────────────────┬──────────┐
+  │  #  │              Nima yetishmaydi              │ Qiyinlik │
+  ├─────┼────────────────────────────────────────────┼──────────┤
+  │ 1   │ Audit log — kim nima qildi (admin amallar) │ O'rta    │
+  ├─────┼────────────────────────────────────────────┼──────────┤
+  │ 2   │ Agent installer script — bash/PS1 fayl     │ Oson     │
+  ├─────┼────────────────────────────────────────────┼──────────┤
+  │ 3   │ MITRE heatmap dashboard'da                 │ O'rta    │
+  ├─────┼────────────────────────────────────────────┼──────────┤
+  │ 4   │ 2FA/TOTP login                             │ Qiyin    │
+  ├─────┼────────────────────────────────────────────┼──────────┤
+  │ 5   │ User management page (frontend)            │ O'rta    │
+  └─────┴────────────────────────────────────────────┴──────────┘
+
+    ┌──────────┬─────────────────┐
+  │          │                 │
+  ├──────────┼─────────────────┤
+  │ Username │ admin           │
+  ├──────────┼─────────────────┤
+  │ Password │ Admin@SIEM2024! │
+  └──────────┴─────────────────┘
+
+
+  ┌───────────────┬───────────────────────┬───────┬───────────────────┐
+  │     Tizim     │          URL          │ Login │       Parol       │
+  ├───────────────┼───────────────────────┼───────┼───────────────────┤
+  │ SIEM UI       │ http://localhost:8080 │ admin │ Admin@SIEM2024!   │
+  ├───────────────┼───────────────────────┼───────┼───────────────────┤
+  │ Grafana       │ http://localhost:3001 │ admin │ Grafana_SIEM_2024 │
+  ├───────────────┼───────────────────────┼───────┼───────────────────┤
+  │ Prometheus    │ http://localhost:9090 │ —     │ —                 │
+  ├───────────────┼───────────────────────┼───────┼───────────────────┤
+  │ Elasticsearch │ http://localhost:9200 │ —     │ —                 │
+  └───────────────┴───────────────────────┴───────┴───────────────────┘
+
+
+
+
+
+
+____________________________________________________________________________________________________
+
+
+● Yetarli ma'lumot bor. Keling to'liq tushuntiray:
+
+  ---
+  1. Agent qo'shish — 3 usul
+
+  Usul A: Linux serveri (eng ko'p ishlatiladigan)
+
+  # SIEM serverida login qilib token oling, keyin:
+  curl -fsSL "http://SIEM_IP:8080/api/installer/linux?manager_url=http://SIEM_IP:8080&agent_name=server-nomi" \
+    -H "Authorization: Bearer TOKEN" | sudo bash
+
+  Bu avtomatik:
+  1. Python tekshiradi/o'rnatadi
+  2. Agent kodini yuklab oladi
+  3. Virtual environment yaratadi
+  4. config.yaml yozadi
+  5. systemd service sifatida o'rnatadi (restart bo'lsa ham avtomatik ishga tushadi)
+
+  ---
+  Usul B: Windows serveri
+
+  # PowerShell (Admin) da:
+  Invoke-WebRequest "http://SIEM_IP:8080/api/installer/windows?manager_url=http://SIEM_IP:8080&agent_name=windows-server" `
+    -Headers @{Authorization="Bearer TOKEN"} -OutFile install.ps1
+  .\install.ps1
+
+  ---
+  Usul C: Docker container sifatida
+
+  docker run -d \
+    --name siem-agent-2 \
+    -e MANAGER_URL=http://SIEM_IP:8080 \
+    -e AGENT_NAME=docker-server \
+    -v /var/log:/var/log:ro \
+    my-siem-agent:latest
+
+  ---
+  2. Agent qo'shilish ketma-ketligi
+
+  Yangi mashina                     SIEM Backend (backend:8000)
+       │                                    │
+       │  POST /api/agents/register         │
+       │ ─────────────────────────────────► │  UUID yaratadi
+       │ ◄───────────────────────────────── │  agent_id qaytaradi
+       │                                    │
+       │  .agent_id faylga saqlaydi         │
+       │                                    │
+       │  POST /api/logs/ingest (har 60s)   │
+       │ ─────────────────────────────────► │  ES ga yozadi
+       │                                    │  Qoidalar tekshiriladi
+       │                                    │  Alert yaratiladi (agar mos kelsa)
+       │  POST /api/agents/{id}/heartbeat   │
+       │ ─────────────────────────────────► │  status = online
+       │                                    │  AR actions qaytaradi
+       │  POST /api/vulns/scan (har 1 soat) │
+       │ ─────────────────────────────────► │  CVE tekshiradi
+       │                                    │
+       │  POST /api/sca/submit (har 1 soat) │
+       │ ─────────────────────────────────► │  konfiguratsiya tekshiruvi
+
+  ---
+  3. SIEM loyihangiz nima vazifalar bajaradi
+
+  Monitoring (Agent tomonidan to'planadi)
+
+  ┌──────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+  │        Vazifa        │                               Nima qiladi                                │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Log yig'ish          │ /var/log/syslog, auth.log, kern.log ni o'qiydi                           │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Heartbeat            │ Har 30 soniyada agent tirikligini bildiradi                              │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ FIM (File Integrity) │ /etc/passwd, /etc/shadow va boshqa muhim fayllar o'zgararsa xabar beradi │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Rootcheck            │ Rootkit fayllari, shubhali cron larni tekshiradi                         │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Process monitor      │ Yangi jarayonlar, privilege escalation ni aniqlaydi                      │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Network monitor      │ C2 ulanishlari, shubhali portlarni kuzatadi                              │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Vuln scanner         │ O'rnatilgan 119 ta paketni CVE bazasi bilan solishtiradi                 │
+  ├──────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ SCA                  │ 49 ta xavfsizlik konfiguratsiyasini tekshiradi (19 pass / 9 fail)        │
+  └──────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+
+  Aniqlash va tahlil (Backend tomonidan)
+
+  ┌───────────────┬──────────────────────────────────────────────────────┐
+  │    Vazifa     │                     Nima qiladi                      │
+  ├───────────────┼──────────────────────────────────────────────────────┤
+  │ Rule Engine   │ 98 ta qoida logga mos kelmasa alert yaratadi         │
+  ├───────────────┼──────────────────────────────────────────────────────┤
+  │ MITRE ATT&CK  │ Har bir alertni ATT&CK taktikasiga moslashtiradi     │
+  ├───────────────┼──────────────────────────────────────────────────────┤
+  │ Threat Intel  │ IP larni AbuseIPDB da tekshiradi                     │
+  ├───────────────┼──────────────────────────────────────────────────────┤
+  │ Correlation   │ Bir nechta hodisani bog'lab katta tahdidni aniqlaydi │
+  ├───────────────┼──────────────────────────────────────────────────────┤
+  │ Alert manager │ Alertlarni Slack / Email orqali yuboradi             │
+  └───────────────┴──────────────────────────────────────────────────────┘
+
+  Javob berish
+
+  ┌─────────────────┬────────────────────────────────────────────────────────────────────────────┐
+  │     Vazifa      │                                Nima qiladi                                 │
+  ├─────────────────┼────────────────────────────────────────────────────────────────────────────┤
+  │ Active Response │ Xavfli IP ni bloklash, foydalanuvchini o'chirish kabi avtomatik harakatlar │
+  └─────────────────┴────────────────────────────────────────────────────────────────────────────┘
+
+  Ko'rish va hisobot
+
+  ┌───────────┬───────────────────────────────────────┐
+  │   Tizim   │                Maqsad                 │
+  ├───────────┼───────────────────────────────────────┤
+  │ Dashboard │ Real-vaqt statistika, grafik          │
+  ├───────────┼───────────────────────────────────────┤
+  │ Grafana   │ Chuqur metrikalar (Prometheus orqali) │
+  ├───────────┼───────────────────────────────────────┤
+  │ Reports   │ PDF/Excel hisobotlar generatsiya      │
+  ├───────────┼───────────────────────────────────────┤
+  │ Audit log │ Kim nima qilganini yozib boradi       │
+  └───────────┴───────────────────────────────────────┘
+
+  ---
+  Xulosa: Bu loyiha kichik-o'rta korxona uchun to'liq SIEM tizimi — Wazuh yoki Splunk ning soddalashtirilgan, o'zingizning serveringizda ishlaydigan muqobili.
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------
+
+
+● Agent nima? (Eng sodda tushuntirish)
+
+  Tasavvur qiling:
+
+  Sizning kompyuteringiz          SIEM Server (Bosh ofis)
+    [Xodim]          ──────────►  [Direktor]
+
+    "Men shu ishladim,            "Rahmat, yozib qo'ydim.
+     bu hodisa bo'ldi"             Shubhali narsa ko'rsam
+                                   xabar beraman"
+
+  Agent = sizning har bir serveringizga o'rnatiladigan kichik dastur.
+  SIEM = o'sha agentlardan ma'lumot yig'ib tahlil qiladigan bosh server.
+
+  ---
+  Qanday ishlaydi? (Ketma-ketlik)
+
+  1-qadam: Agent birinchi marta ishga tushadi
+
+  Agent: "Salom, men yangi serveriman, ismim web-server-01"
+  SIEM:  "Yaxshi, sening ID ing: abc-123, xush kelding"
+  Agent: ID ni .agent_id faylga saqlaydi
+
+  2-qadam: Agent har 30 soniyada "tirikman" deydi
+
+  Agent ──► SIEM: "Heartbeat - tirikman"
+  SIEM  ──► Agent: "OK, bloklanishi kerak IP bor edi, uni bloklа"
+
+  3-qadam: Agent har 60 soniyada loglarni yuboradi
+
+  Agent /var/log/syslog ni o'qiydi
+     └─► SIEM ga yuboradi
+           └─► SIEM qoidalar bilan tekshiradi
+                 └─► Shubhali narsa bo'lsa ALERT yaratadi
+
+  4-qadam: Agent har 1 soatda zaifliklarni tekshiradi
+
+  Agent: "Menda pip, curl, openssh... 119 ta paket bor"
+  SIEM:  "CVE bazasidan tekshirdim — 131 ta zaiflik topdim!"
+
+  ---
+  Hozir qo'shish (amaliy)
+
+  Sizda 2 ta variant bor:
+
+  ---
+  Variant 1 — Shu kompyuterda (Docker, hoziroq sinash)
+
+  Hozirgi agent allaqachon ishlamoqda:
+  docker ps | grep agent
+  # siem-agent   Up 10 minutes ✓
+
+  ---
+  Variant 2 — Boshqa Linux serverga o'rnatish
+
+  O'sha serverda quyidagi buyruqni ishlatish kerak:
+
+  # 1. TOKEN oling (bir marta)
+  TOKEN=$(curl -s -X POST http://SIZNING_SIEM_IP:8080/api/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=admin&password=Admin@SIEM2024!" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+  # 2. Installer skriptni yuklab ishga tushiring
+  curl -fsSL \
+    "http://SIZNING_SIEM_IP:8080/api/installer/linux?manager_url=http://SIZNING_SIEM_IP:8080&agent_name=server-nomi" \
+    -H "Authorization: Bearer $TOKEN" \
+    | sudo bash
+
+  Bu avtomatik qiladi:
+  ✓ Python borligini tekshiradi
+  ✓ Agent kodini yuklab oladi
+  ✓ /opt/siem-agent/ ga o'rnatadi
+  ✓ systemd service yaratadi (kompyuter o'chsa ham qayta ishga tushadi)
+  ✓ SIEM ga ro'yxatdan o'tadi
+
+  ---
+  Variant 3 — Windows serverga
+
+  # PowerShell (Admin) da:
+  $token = (Invoke-RestMethod -Uri "http://SIEM_IP:8080/api/auth/login" `
+    -Method POST -ContentType "application/x-www-form-urlencoded" `
+    -Body "username=admin&password=Admin@SIEM2024!").access_token
+
+  Invoke-WebRequest "http://SIEM_IP:8080/api/installer/windows?manager_url=http://SIEM_IP:8080&agent_name=windows-01" `
+    -Headers @{Authorization="Bearer $token"} -OutFile install.ps1
+
+  .\install.ps1
+
+  ---
+  O'rnatilgandan keyin nima ko'rinadi?
+
+  SIEM Dashboard da:
+
+  ┌─────────────────────────────────────┐
+  │  AGENTS                             │
+  │                                     │
+  │  ● web-server-01    ONLINE  ✓      │
+  │  ● db-server-02     ONLINE  ✓      │  ← yangi qo'shildi
+  │  ○ old-server       OFFLINE ✗      │
+  └─────────────────────────────────────┘
+
+  ---
+  Bitta narsa esda tuting
+
+  SIZNING_SIEM_IP  =  bu kompyuterning IP si
+                      (localhost emas! Boshqa serverdan ko'rinishi kerak)
+
+  Topish:
+  $ ip addr | grep inet
+    inet 192.168.1.100 ← mana shu
+
+  Savolingiz bormi?
+
+
+
+===========================================
+
+
+
+❯ hozir bu wazuhdan token olib ishlaydigon boladimi
+
+● Yo'q, bu Wazuh emas — bu sizning o'z loyihangiz SecureWatch SIEM.
+
+  Token ham Wazuh dan emas, sizning backend dan olinadi (FastAPI → localhost:8000).
+
+  ---
+  Farqi:
+
+  ┌───────────┬─────────────────────────┬───────────────────────────────────┐
+  │           │          Wazuh          │          Sizning loyiha           │
+  ├───────────┼─────────────────────────┼───────────────────────────────────┤
+  │ Token     │ Wazuh API dan           │ localhost:8000/api/auth/login dan │
+  ├───────────┼─────────────────────────┼───────────────────────────────────┤
+  │ Agent     │ wazuh-agent paketi      │ siem-agent (Python)               │
+  ├───────────┼─────────────────────────┼───────────────────────────────────┤
+  │ O'rnatish │ apt install wazuh-agent │ curl ... | sudo bash              │
+  └───────────┴─────────────────────────┴───────────────────────────────────┘
+
+  ---
+  Sizning loyihangiz Wazuh ga o'xshash ishlaydi, lekin mustaqil — hamma narsa o'zingizning serveringizda.
+
+❯ tokenni qaydan olinadi
+
+● Tokenni SIEM backend dan olasiz — 2 usul:
+
+  ---
+  Usul 1: Terminal
+
+  curl -s -X POST http://localhost:8000/api/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=admin&password=Admin@SIEM2024!"
+
+  Javob:
+  {
+    "access_token": "eyJhbGci...",
+    "token_type": "bearer"
+  }
+
+  ---
+  Usul 2: Browser (UI dan)
+
+  http://localhost:8080 ga kiring → Login qiling → F12 (DevTools) → Application → Local Storage → access_token
+
+  ---
+  Usul 3: API docs
+
+  http://localhost:8000/docs — Swagger UI, u yerda ham login qilib token olsa bo'ladi.
+
+❯ # 1. Token oling
+
+    TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+
+      -d "username=admin&password=Admin@SIEM2024!" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+
+    # 2. Skriptni yuklab ishga tushiring (bir qator)
+
+    curl -fsSL \
+      "http://localhost:8000/api/installer/linux?manager_url=http://localhost:8000&agent_name=server-nomi" \
+
+      -H "Authorization: Bearer $TOKEN" \
+
+      | sudo bash
+
+
+
+    server-nomi o'rniga o'z nomingizni yozing, masalan web-server-01.
+
+
+    Boshqa serverga o'rnatayotgan bo'lsangiz localhost o'rniga SIEM serverning haqiqiy IP sini yozing.
+
+  shu qismni aytyapman qanday olinishi va boshqa ketma ketliklarni o'rgat
+
+● Bu buyruqni qadamma qadam tushuntiraman:
+
+  ---
+  1-qadam: Token olish
+
+  TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=admin&password=Admin@SIEM2024!" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+  Bu nima qiladi:
+  curl → login so'rov yuboradi
+       → {"access_token": "eyJhbGci..."} qaytadi
+  python3 → faqat token qiymatini oladi
+  TOKEN=  → o'sha qiymatni TOKEN o'zgaruvchisiga saqlaydi
+
+  Token saqlanganini tekshirish:
+  echo $TOKEN
+  # eyJhbGciOiJIUzI1NiIs...  ← shunday uzun matn chiqadi
+
+  ---
+  2-qadam: Installer skriptni yuklab ishga tushirish
+
+  curl -fsSL \
+    "http://localhost:8000/api/installer/linux?manager_url=http://localhost:8000&agent_name=web-server-01" \
+    -H "Authorization: Bearer $TOKEN" \
+    | sudo bash
+
+  Bu nima qiladi:
+  curl → backend dan install.sh skriptni yuklab oladi
+       → TOKEN orqali o'zini tanittiradi (ruxsat oladi)
+  sudo bash → o'sha skriptni root huquqida ishga tushiradi
+
+  ---
+  To'liq ketma-ketlik (hamma narsa)
+
+  Siz (terminal)           Backend (localhost:8000)        Agent
+       │                          │                          │
+       │── POST /auth/login ──────►│                          │
+       │◄── access_token ─────────│                          │
+       │                          │                          │
+       │── GET /installer/linux ──►│                          │
+       │◄── install.sh skript ────│                          │
+       │                          │                          │
+       │── sudo bash install.sh   │                          │
+       │   (skript ichida:)       │                          │
+       │   Python o'rnatadi       │                          │
+       │   Agent yuklab oladi     │                          │
+       │   config.yaml yozadi     │                          │
+       │   systemd service yaratadi                          │
+       │                          │                          │
+       │                          │◄── POST /agents/register─│
+       │                          │─── agent_id ────────────►│
+       │                          │                          │
+       │                          │◄── POST /logs/ingest ────│  (har 60s)
+       │                          │◄── POST /heartbeat ──────│  (har 30s)
+
+  ---
+  Hozir sinab ko'rish
+
+  # Token olish
+  TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=admin&password=Admin@SIEM2024!" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+  # Token bor-yo'qligini tekshirish
+  echo $TOKEN
+
+  # Agent o'rnatish
+  curl -fsSL \
+    "http://localhost:8000/api/installer/linux?manager_url=http://localhost:8000&agent_name=web-server-01" \
+    -H "Authorization: Bearer $TOKEN" \
+    | sudo bash
+
+  ---
+  Eslatma: Hozir Docker ichida 1 ta agent allaqachon ishlayapti (siem-agent). Bu buyruq esa shu xost mashinaning o'ziga yoki boshqa serverga agent o'rnatish uchun.
+
+
+///////////////////////////////////////////////////////
+ Har agent uchun ko'rsatadi:
+    • O'rnatilgan paketlar (rpm/dpkg) + versiyalar
+    • Ochiq portlar + qaysi process ushlab turganini
+    • Ishlab turgan processlar (PID, user, CPU/RAM)
+    • Tarmoq interfeyslari + IP manzillar
+  Agent har 1 soatda scan qilib serverga yuboradi. Vulnerability detection ham shu ma'lumotga tayanadi.

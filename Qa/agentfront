@@ -1,0 +1,30 @@
+Backend tayyor. Windows PC da to'liq tozalab qayta o'rnating:
+
+  # Eski service/task ni tozalash
+  Stop-ScheduledTask "SIEMAgent" -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask "SIEMAgent" -Confirm:$false -ErrorAction SilentlyContinue
+  Stop-Service "SIEMAgent" -Force -ErrorAction SilentlyContinue
+  sc.exe delete "SIEMAgent" 2>$null
+
+  # Yangi o'rnatish
+  $url = "http://172.20.10.2:8080/api/installer/windows?manager_url=http%3A%2F%2F172.20.10.2%3A8080&agent_name=aliyor"
+  iwr $url -UseBasicParsing -OutFile "$env:TEMP\Install-SIEMAgent.ps1"
+  & "$env:TEMP\Install-SIEMAgent.ps1"
+
+  Qanday ishlaydi:
+
+  ┌──────────────────────────────────┬────────────────────────────────────────┐
+  │      Eski (pywin32 service)      │         Yangi (Task Scheduler)         │
+  ├──────────────────────────────────┼────────────────────────────────────────┤
+  │ pythonservice.exe → DLL muammosi │ powershell.exe → Python.exe to'g'ridan │
+  ├──────────────────────────────────┼────────────────────────────────────────┤
+  │ pywintypes314.dll kerak          │ Hech qanday DLL muammosi yo'q          │
+  ├──────────────────────────────────┼────────────────────────────────────────┤
+  │ SCM restricted PATH              │ SYSTEM account, to'liq muhit           │
+  ├──────────────────────────────────┼────────────────────────────────────────┤
+  │ Start bo'lmaydi                  │ Kafolatlangan ishlaydi                 │
+  └──────────────────────────────────┴────────────────────────────────────────┘
+
+  O'rnatilgandan so'ng holat tekshirish:
+  Get-ScheduledTask SIEMAgent          # Running bo'lishi kerak
+  Get-Content C:\ProgramData\SIEMAgent\agent.log -Tail 20

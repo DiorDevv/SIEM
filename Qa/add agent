@@ -1,0 +1,83 @@
+Ishga tushirish (fonda, terminal yopilsa ham ishlaydi)
+
+  cd /home/dior/Desktop/SIEM/my-siem/agent
+  source venv/bin/activate
+  nohup python3 agent.py > agent.log 2>&1 &
+
+  ---
+  Ishlayaptimi tekshirish
+
+  pgrep -a python3 | grep agent
+  Raqam chiqsa — ishlayapti. Hech narsa chiqmasa — to'xtagan.
+
+  ---
+  Loglarni ko'rish (jonli)
+
+  tail -f /home/dior/Desktop/SIEM/my-siem/agent/agent.log
+  Ctrl+C — logdan chiqish (agent to'xtamaydi)
+
+  ---
+  To'xtatish
+
+  pkill -f agent.py
+
+  ---
+  Restart qilish
+
+  pkill -f agent.py
+  cd /home/dior/Desktop/SIEM/my-siem/agent
+  source venv/bin/activate
+  nohup python3 agent.py > agent.log 2>&1 &
+
+  ---
+  Noutbuk o'chib yonsa — qayta ishga tushirish
+
+  Har safar noutbuk qayta yonganda quyidagini bir marta yozing:
+  cd /home/dior/Desktop/SIEM/my-siem/agent && source venv/bin/activate && nohup python3 agent.py > agent.log 2>&1 &
+
+
+
+
+
+
+
+
+ Holat tekshirish
+
+  sudo systemctl status siem-agent
+
+  Ishga tushirish
+
+  sudo systemctl start siem-agent
+
+  To'xtatish
+
+  sudo systemctl stop siem-agent
+
+  Restart
+
+  sudo systemctl restart siem-agent
+
+  Loglarni ko'rish (jonli)
+
+  sudo journalctl -u siem-agent -f
+
+  Loglarni ko'rish (oxirgi 50 qator)
+
+  sudo journalctl -u siem-agent -n 50
+
+  ---
+  Config faylini o'zgartirish
+
+  nano /home/dior/Desktop/SIEM/my-siem/agent/config.yaml
+  O'zgartirgach restart:
+  sudo systemctl restart siem-agent
+
+  ---
+  Avtomatik ishga tushishni o'chirish
+
+  sudo systemctl disable siem-agent
+
+  Avtomatik ishga tushishni yoqish
+
+  sudo systemctl enable siem-agent

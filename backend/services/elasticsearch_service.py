@@ -12,11 +12,15 @@ es_client: Optional[AsyncElasticsearch] = None
 def get_es_client() -> AsyncElasticsearch:
     global es_client
     if es_client is None:
-        es_client = AsyncElasticsearch(
+        kwargs: Dict[str, Any] = dict(
             hosts=[settings.ELASTICSEARCH_URL],
             retry_on_timeout=True,
             max_retries=3,
+            verify_certs=settings.ELASTICSEARCH_VERIFY_CERTS,
         )
+        if settings.ELASTICSEARCH_PASSWORD:
+            kwargs["basic_auth"] = (settings.ELASTICSEARCH_USERNAME, settings.ELASTICSEARCH_PASSWORD)
+        es_client = AsyncElasticsearch(**kwargs)
     return es_client
 
 
@@ -107,12 +111,13 @@ async def setup_index_template():
         logger.warning(f"Could not create ILM policy: {e}")
 
     try:
+        # ES 8.x requires mappings/settings nested inside `template`
         await client.indices.put_index_template(
             name="siem-logs-template",
             body={
                 "index_patterns": [f"{settings.ES_LOG_INDEX_PREFIX}-*"],
-                **INDEX_MAPPING,
                 "priority": 100,
+                "template": INDEX_MAPPING,
             },
         )
         logger.info(

@@ -11,6 +11,7 @@ Pipeline per log:
   7. Alert creation with dedup + cooldown
 """
 import re
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
@@ -60,9 +61,14 @@ def _eval_field(rule: Rule, parsed: dict) -> bool:
         except (ValueError, TypeError):
             return False
 
-    # Regex match
+    # Regex match — validate pattern first to prevent ReDoS
     if cond.startswith("~"):
-        return bool(re.search(cond[1:], str(val), re.I))
+        pattern = cond[1:]
+        try:
+            return bool(re.search(pattern, str(val), re.I))
+        except re.error:
+            logger.warning("Invalid regex pattern in rule, skipping: %r", pattern)
+            return False
 
     # Exact match
     return str(val).lower() == cond.lower()
@@ -228,7 +234,7 @@ async def _create_alert(
         level    += 2
         severity  = level_to_severity(level)
 
-    agg_key = f"{rule.id}:{agent_id}:{src_ip or ''}"[:128]
+    agg_key = hashlib.sha256(f"{rule.id}:{agent_id}:{src_ip or ''}".encode()).hexdigest()[:32]
 
     return await _upsert_alert(
         db,
@@ -476,7 +482,7 @@ async def run_rules_against_logs(
                     description    = anomaly.description,
                     severity       = anomaly.severity,
                     level          = anomaly.level,
-                    agg_key        = f"anomaly:{agent_id}:{anomaly.metric_key}"[:128],
+                    agg_key        = hashlib.sha256(f"anomaly:{agent_id}:{anomaly.metric_key}".encode()).hexdigest()[:32],
                     rule_name      = f"Anomaly Detector [{anomaly.metric_key}]",
                     category       = "anomaly",
                     groups         = "anomaly,statistical,behavioral",
@@ -518,7 +524,7 @@ async def run_rules_against_logs(
                         description    = pattern["description"],
                         severity       = pattern["severity"],
                         level          = pattern["level"],
-                        agg_key        = f"composite:{agent_id}:{pattern['name']}:{src_ip or ''}"[:128],
+                        agg_key        = hashlib.sha256(f"composite:{agent_id}:{pattern['name']}:{src_ip or ''}".encode()).hexdigest()[:32],
                         rule_name      = pattern["name"],
                         category       = "correlation",
                         groups         = "correlation,composite",
