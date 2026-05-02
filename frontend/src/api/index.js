@@ -15,11 +15,26 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config
-    if (error.response?.status === 401 && !original._retry) {
+
+    // Retry transient server errors (5xx, network timeout) with exponential backoff
+    const status = error.response?.status
+    const isRetryable = !status || status === 429 || status >= 500
+    const retryCount = original._retryCount || 0
+    if (isRetryable && retryCount < 3 && !original._noRetry) {
+      original._retryCount = retryCount + 1
+      const delay = Math.min(1000 * 2 ** retryCount, 8000)
+      await sleep(delay)
+      return api(original)
+    }
+
+    // Refresh token on 401
+    if (status === 401 && !original._retry) {
       original._retry = true
       const refreshToken = localStorage.getItem('refresh_token')
       if (refreshToken) {
@@ -40,6 +55,7 @@ api.interceptors.response.use(
         window.location.href = '/login'
       }
     }
+
     return Promise.reject(error)
   }
 )

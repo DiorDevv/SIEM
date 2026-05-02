@@ -1,0 +1,88 @@
+groups:
+  - name: siem_critical
+    interval: 30s
+    rules:
+      - alert: BackendDown
+        expr: up{job="siem-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SIEM backend is unreachable"
+          description: "The SIEM backend has been down for more than 1 minute."
+
+      - alert: ElasticsearchDown
+        expr: up{job="elasticsearch"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elasticsearch is unreachable"
+          description: "Elasticsearch has been down for more than 2 minutes. Log ingestion stopped."
+
+      - alert: ElasticsearchClusterRed
+        expr: elasticsearch_cluster_health_status{color="red"} == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elasticsearch cluster status is RED"
+          description: "One or more primary shards are unassigned. Data loss is possible."
+
+  - name: siem_warnings
+    interval: 60s
+    rules:
+      - alert: HighBackendErrorRate
+        expr: |
+          rate(http_requests_total{job="siem-backend", status=~"5.."}[5m]) /
+          rate(http_requests_total{job="siem-backend"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate on SIEM backend"
+          description: "More than 5% of requests are returning 5xx errors over the last 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes{name=~"siem-.*"} /
+           container_spec_memory_limit_bytes{name=~"siem-.*"}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container memory usage above 85%"
+          description: "Container {{ $labels.name }} is using more than 85% of its memory limit."
+
+      - alert: ElasticsearchDiskHigh
+        expr: |
+          elasticsearch_filesystem_data_available_bytes /
+          elasticsearch_filesystem_data_size_bytes < 0.15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elasticsearch disk usage above 85%"
+          description: "Less than 15% disk space remaining on Elasticsearch data node."
+
+      - alert: SlowAlertProcessing
+        expr: |
+          histogram_quantile(0.99,
+            rate(http_request_duration_seconds_bucket{job="siem-backend", handler="/api/logs/ingest"}[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Log ingestion p99 latency above 2s"
+          description: "Alert processing pipeline is slow. Check rule engine and database load."
+
+      - alert: AgentHeartbeatMissing
+        expr: |
+          siem_agents_offline_total > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "One or more SIEM agents are offline"
+          description: "{{ $value }} agent(s) missed their heartbeat. Check agent connectivity."

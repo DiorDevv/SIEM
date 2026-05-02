@@ -4,6 +4,15 @@ global:
   external_labels:
     monitor: 'siem-monitor'
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   - job_name: 'siem-backend'
     static_configs:

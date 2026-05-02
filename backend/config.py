@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "SecureWatch SIEM"
     APP_VERSION: str = "2.0.0"
-    DEBUG: bool = False
 
-    # Secret key — MUST be set via env in production
+    # Secret key — REQUIRED in production (non-DEBUG)
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     # Elasticsearch
     ELASTICSEARCH_URL: str = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+    ELASTICSEARCH_USERNAME: str = os.getenv("ELASTICSEARCH_USERNAME", "elastic")
+    ELASTICSEARCH_PASSWORD: str = os.getenv("ELASTICSEARCH_PASSWORD", "")
+    ELASTICSEARCH_VERIFY_CERTS: bool = os.getenv("ELASTICSEARCH_VERIFY_CERTS", "false").lower() == "true"
     ES_LOG_INDEX_PREFIX: str = "siem-logs"
     ES_NUMBER_OF_SHARDS: int = int(os.getenv("ES_NUMBER_OF_SHARDS", "2"))
     ES_NUMBER_OF_REPLICAS: int = int(os.getenv("ES_NUMBER_OF_REPLICAS", "1"))
@@ -115,15 +118,17 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     s = Settings()
 
-    # Auto-generate SECRET_KEY if not provided (warn loudly)
     if not s.SECRET_KEY:
+        if not s.DEBUG:
+            raise RuntimeError(
+                "SECRET_KEY environment variable is required in production. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
         generated = secrets.token_hex(32)
-        logger.critical(
-            "SECRET_KEY not set! A random key has been generated for this session. "
-            "Set SECRET_KEY in your .env file for persistent authentication. "
-            f"Example: SECRET_KEY={generated}"
+        logger.warning(
+            "SECRET_KEY not set — using ephemeral key (development only). "
+            "Tokens will be invalidated on restart. Set SECRET_KEY in .env for persistence."
         )
-        # Allow startup but tokens will invalidate on restart
         object.__setattr__(s, "SECRET_KEY", generated)
 
     return s
