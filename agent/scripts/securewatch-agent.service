@@ -1,0 +1,45 @@
+[Unit]
+Description=SecureWatch SIEM Agent
+Documentation=https://github.com/your-org/securewatch
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=securewatch
+Group=securewatch
+
+WorkingDirectory=/opt/securewatch-agent
+ExecStart=/opt/securewatch-agent/venv/bin/python3 /opt/securewatch-agent/agent.py
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy — always restart except on explicit stop
+Restart=on-failure
+RestartSec=10s
+
+# Logging — goes to journald (journalctl -u securewatch-agent -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=securewatch-agent
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/securewatch-agent/.env
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/securewatch-agent /var/log/securewatch
+ProtectHome=read-only
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_NET_ADMIN CAP_SYS_PTRACE
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+
+[Install]
+WantedBy=multi-user.target

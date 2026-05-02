@@ -1,0 +1,321 @@
+services:
+
+  # ── Data stores ──────────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: siem-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: siem
+      POSTGRES_USER: siem
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siem_change_me_now}
+    ports:
+      - "127.0.0.1:5434:5432"   # Bind to localhost only
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c work_mem=4MB
+      -c wal_level=replica
+      -c log_min_duration_statement=1000
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U siem -d siem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: siem-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - cluster.name=siem-cluster
+      - bootstrap.memory_lock=true
+      - indices.lifecycle.poll_interval=1m
+      - indices.recovery.max_bytes_per_sec=100mb
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "127.0.0.1:9200:9200"   # Bind to localhost only
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+          cpus: '2.0'
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    container_name: siem-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6380:6379"   # Bind to localhost only
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:-redis_change_me_now}
+      --save 900 1
+      --save 300 10
+      --appendonly yes
+      --appendfsync everysec
+      --tcp-keepalive 300
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_change_me_now}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Application ───────────────────────────────────────────────────────────────
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: siem-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://siem:${POSTGRES_PASSWORD:-siem_change_me_now}@postgres:5432/siem
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_change_me_now}@redis:6379
+      SECRET_KEY: ${SECRET_KEY:-}
+      DB_POOL_SIZE: "20"
+      DB_MAX_OVERFLOW: "40"
+      ES_NUMBER_OF_SHARDS: "2"
+      ES_NUMBER_OF_REPLICAS: "1"
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-90}
+      WORKERS: ${WORKERS:-4}
+      CORS_ORIGINS: '["https://localhost","https://localhost:443","http://localhost:3000","http://localhost:8080"]'
+      GEOIP_ENABLED: "true"
+      SMTP_ENABLED: "${SMTP_ENABLED:-false}"
+      SMTP_HOST: "${SMTP_HOST:-smtp.gmail.com}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-siem@yourdomain.com}"
+      SMTP_TO: "${SMTP_TO:-}"
+      SMTP_USE_TLS: "${SMTP_USE_TLS:-true}"
+      SLACK_ENABLED: "${SLACK_ENABLED:-false}"
+      SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
+      SLACK_CHANNEL: "${SLACK_CHANNEL:-#siem-alerts}"
+      ABUSEIPDB_API_KEY: "${ABUSEIPDB_API_KEY:-}"
+      ABUSEIPDB_ENABLED: "${ABUSEIPDB_ENABLED:-false}"
+      NVD_API_KEY: "${NVD_API_KEY:-}"
+      NVD_ENABLED: "${NVD_ENABLED:-true}"
+      METRICS_ENABLED: "true"
+    volumes:
+      - ./agent:/app/agent:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '2.0'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_WS_URL: ""
+    container_name: siem-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+
+  nginx:
+    image: nginx:alpine
+    container_name: siem-nginx
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8080:80"
+      - "0.0.0.0:8443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+      - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.5'
+
+  # ── Monitoring ────────────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: siem-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: siem-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana_change_me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_SERVER_ENABLE_GZIP: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  # ── Agent (optional — run with: docker compose --profile agent up) ────────────
+  #
+  # SECURITY NOTE:
+  #   privileged: true  — required for inotify FIM, auditd, process/network monitoring
+  #   pid: host         — required to see all host processes (process_monitor)
+  #
+  # Without these the agent still runs but with reduced visibility:
+  #   - Process monitor only sees container-internal processes
+  #   - Some rootcheck checks will fail gracefully
+  #   - FIM inotify works (watches are created inside the container)
+  #
+  # To run WITHOUT privileged mode (reduced monitoring):
+  #   Remove the `privileged` and `pid` lines below.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: siem-agent
+    restart: unless-stopped
+    privileged: true          # needed for inotify, auditd, /proc access
+    pid: host                 # needed for full host process monitoring
+    environment:
+      MANAGER_URL: http://backend:8000
+      AGENT_NAME: ${AGENT_NAME:-${HOSTNAME:-siem-agent}}
+      AGENT_SECRET: ${AGENT_SECRET:-}
+      DATA_DIR: /app/data
+      LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
+      GEOIP_ENABLED: ${GEOIP_ENABLED:-false}
+      THREAT_INTEL_ENABLED: ${THREAT_INTEL_ENABLED:-false}
+      ABUSEIPDB_KEY: ${ABUSEIPDB_API_KEY:-}
+    volumes:
+      # Host log files — read-only
+      - /var/log:/var/log:ro
+      # Host config files — read-only (for FIM and rootcheck)
+      - /etc:/etc:ro
+      # Host proc — read-only (for rootcheck and network monitoring)
+      - /proc:/proc:ro
+      # Host sys — read-only (for kernel module detection)
+      - /sys:/sys:ro
+      # Run/systemd for journald cursor (gracefully skipped if unavailable)
+      - /run/systemd:/run/systemd:ro
+      # Persistent data: buffer.db, .agent_id, state files
+      - agent_data:/app/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+    sysctls:
+      # Increase inotify limits for real-time FIM on large file trees
+      - fs.inotify.max_user_watches=524288
+      - fs.inotify.max_queued_events=32768
+    profiles:
+      - agent
+
+volumes:
+  postgres_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  agent_data:
+    driver: local    # persists buffer.db + .agent_id + state files across restarts
