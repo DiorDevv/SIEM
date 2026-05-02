@@ -1,0 +1,72 @@
+ SIEM loyihasini ishga tushirish tartibi
+
+  Papkaga o'tish (har doim shu papkada ishlaysiz)
+
+  cd /home/dior/Desktop/SIEM/my-siem
+
+  ---
+  1. Loyihani ishga tushirish
+
+  docker compose up -d
+  - -d — background (fon)da ishga tushiradi
+  - Barcha servislar avtomatik to'g'ri tartibda ko'tariladi: Postgres → ES → Redis → Backend → Frontend → Nginx
+
+  ---
+  2. Holat tekshirish
+
+  docker compose ps
+  Hamma narsa Up (healthy) bo'lishi kerak.
+
+  ---
+  3. Loglarni ko'rish
+
+  # Barcha servislar logi
+  docker compose logs -f
+
+  # Faqat backend logi
+  docker compose logs -f backend
+
+  # Faqat frontend logi
+  docker compose logs -f frontend
+  Ctrl+C — logdan chiqish
+
+  ---
+  4. Agentni ham ishga tushirish (ixtiyoriy)
+
+  docker compose --profile agent up -d
+
+  ---
+  5. Loyihani to'xtatish
+
+  docker compose down
+
+  6. To'xtatib, ma'lumotlarni ham o'chirish (ehtiyot bo'ling!)
+
+  docker compose down -v
+
+  ---
+  7. Rebuild qilish (kod o'zgarganda)
+
+  docker compose up -d --build
+
+  ---
+  Manzillar (hozir ishlayapti)
+
+  ┌─────────────────┬────────────────────────┐
+  │     Servis      │          URL           │
+  ├─────────────────┼────────────────────────┤
+  │ SIEM UI         │ http://localhost:8080  │
+  ├─────────────────┼────────────────────────┤
+  │ SIEM UI (HTTPS) │ https://localhost:8443 │
+  ├─────────────────┼────────────────────────┤
+  │ Backend API     │ http://localhost:8000  │
+  ├─────────────────┼────────────────────────┤
+  │ Grafana         │ http://localhost:3001  │
+  ├─────────────────┼────────────────────────┤
+  │ Prometheus      │ http://localhost:9090  │
+  └─────────────────┴────────────────────────┘
+
+  Grafana login: admin / Grafana_SIEM_2024
+
+  ---
+  Hozir hamma 8 ta konteyner Up holatda — loyiha to'liq ishlayapti.

@@ -1,0 +1,63 @@
+ 1 — Python borligini tekshiring
+
+  python3 --version
+  Yo'q bo'lsa:
+  sudo apt install python3 python3-pip python3-venv -y
+
+  ---
+  2 — Agent fayllarini ko'chiring
+
+  Birinchi noutbukda terminal oching:
+  scp -r /home/dior/Desktop/SIEM/my-siem/agent boshqa_noutbuk_IP:/home/USERNAME/siem-agent
+
+  Yoki GitHub dan yuklab oling (ikkinchi noutbukda):
+  git clone https://github.com/DiorDevv/SIEM.git
+  cd SIEM/agent
+
+  ---
+  3 — Virtual environment va paketlar
+
+  cd ~/SIEM/agent
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+
+  ---
+  4 — Config sozlang
+
+  nano config.yaml
+  O'zgartiring:
+  manager_url: http://84.8.147.84:8080
+  agent_name: ikkinchi-noutbuk
+
+  ---
+  5 — Systemd service yarating
+
+  sudo nano /etc/systemd/system/siem-agent.service
+
+  Yozing (USERNAME ni o'zgartiping):
+  [Unit]
+  Description=SIEM Agent
+  After=network.target
+
+  [Service]
+  Type=simple
+  User=USERNAME
+  WorkingDirectory=/home/USERNAME/SIEM/agent
+  ExecStart=/home/USERNAME/SIEM/agent/venv/bin/python3 agent.py
+  Restart=always
+  RestartSec=10
+
+  [Install]
+  WantedBy=multi-user.target
+
+  ---
+  6 — Ishga tushiring
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable siem-agent
+  sudo systemctl start siem-agent
+  sudo systemctl status siem-agent
+
+  ---
+  SIEM dashboardda yangi agent ko'rinadi. Savolingiz bo'lsa ayting!

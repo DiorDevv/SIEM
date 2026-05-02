@@ -1,0 +1,10 @@
+git add .
+  git commit -m "o'zgarish tavsifi"
+  git push origin main
+
+  Serverda (yangilash uchun):
+
+  cd ~/SIEM
+  git pull
+  docker compose up -d --build
+

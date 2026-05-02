@@ -1,0 +1,25 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="uvicorn" />
+          <option value="sqlalchemy" />
+          <option value="psycopg2-binary" />
+          <option value="redis" />
+          <option value="pytest-cov" />
+          <option value="pytest-asyncio" />
+          <option value="pytest-playwright" />
+          <option value="httpx" />
+          <option value="black" />
+          <option value="flake8" />
+          <option value="isort" />
+          <option value="mypy" />
+          <option value="safety" />
+          <option value="bandit" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
