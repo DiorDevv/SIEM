@@ -111,12 +111,13 @@ async def setup_index_template():
         logger.warning(f"Could not create ILM policy: {e}")
 
     try:
+        # ES 8.x requires mappings/settings nested inside `template`
         await client.indices.put_index_template(
             name="siem-logs-template",
             body={
                 "index_patterns": [f"{settings.ES_LOG_INDEX_PREFIX}-*"],
-                **INDEX_MAPPING,
                 "priority": 100,
+                "template": INDEX_MAPPING,
             },
         )
         logger.info(
