@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback } from 'react'
 import { useLang } from '../context/LanguageContext'
 
 const API_BASE = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')
@@ -33,7 +33,7 @@ const CopyIcon = ({ copied }) => copied
   ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
   : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── constants ────────────────────────────────────────────────────────────────
 
 const TABS = [
   { id: 'linux',   label: 'Linux',   Icon: LinuxIcon,   color: '#f97316' },
@@ -44,46 +44,101 @@ const TABS = [
 
 const STEPS = {
   linux: [
-    { icon: '🔍', title: 'Pre-flight',   desc: 'Checks root, connectivity, disk space' },
-    { icon: '🐍', title: 'Python',       desc: 'Detects or installs Python 3.8+' },
-    { icon: '👤', title: 'System user',  desc: "Creates 'siemagt' unprivileged user" },
-    { icon: '📦', title: 'Download',     desc: 'Fetches agent archive from backend' },
-    { icon: '📚', title: 'Virtualenv',   desc: 'Isolated venv + pip install' },
-    { icon: '⚙️', title: 'Config',       desc: 'Writes config.yaml with your settings' },
-    { icon: '🚀', title: 'Systemd',      desc: 'Enables & starts siem-agent.service' },
+    { icon: '🔍', title: 'Pre-flight',      desc: 'Checks root, connectivity, disk space' },
+    { icon: '🐍', title: 'Python',          desc: 'Detects or installs Python 3.8+' },
+    { icon: '👤', title: 'System user',     desc: "Creates 'siemagt' unprivileged user" },
+    { icon: '📦', title: 'Download',        desc: 'Fetches agent archive from backend' },
+    { icon: '📚', title: 'Virtualenv',      desc: 'Isolated venv + pip install' },
+    { icon: '⚙️', title: 'Config',          desc: 'Writes config.yaml with your settings' },
+    { icon: '🚀', title: 'Systemd',         desc: 'Enables & starts siem-agent.service' },
   ],
   windows: [
-    { icon: '🔍', title: 'Admin check',  desc: 'Verifies elevated PowerShell' },
-    { icon: '🐍', title: 'Python',       desc: 'Detects or installs via winget' },
-    { icon: '📦', title: 'Download',     desc: 'Fetches agent archive from backend' },
-    { icon: '📚', title: 'Virtualenv',   desc: 'venv + pip install in ProgramData' },
-    { icon: '🚀', title: 'Service',      desc: 'Registers & starts Windows Service' },
+    { icon: '🔍', title: 'Admin check',     desc: 'Verifies elevated PowerShell (Run as Administrator)' },
+    { icon: '🐍', title: 'Python',          desc: 'Detects Python 3.8+ or auto-installs via winget' },
+    { icon: '📦', title: 'Download',        desc: 'Fetches agent archive from backend → C:\\ProgramData\\SIEMAgent' },
+    { icon: '📚', title: 'Virtualenv',      desc: 'Creates venv + pip install (no pywin32 needed)' },
+    { icon: '🚀', title: 'Task Scheduler',  desc: 'Registers SYSTEM-level scheduled task — auto-start on boot, auto-restart on crash' },
   ],
   macos: [
-    { icon: '🔍', title: 'Pre-flight',    desc: 'Checks root, macOS 12+, connectivity' },
-    { icon: '🐍', title: 'Python',        desc: 'Detects or installs via Homebrew' },
-    { icon: '👤', title: 'Service user',  desc: "Creates '_siemagt' system account" },
-    { icon: '📦', title: 'Download',      desc: 'Fetches agent archive from backend' },
-    { icon: '📚', title: 'Virtualenv',    desc: 'Isolated venv + pip install' },
-    { icon: '⚙️', title: 'Config',        desc: 'Writes config.yaml with macOS log paths' },
-    { icon: '🚀', title: 'LaunchDaemon', desc: 'Installs & loads com.securewatch.siem-agent plist' },
+    { icon: '🔍', title: 'Pre-flight',      desc: 'Checks root, macOS 12+, connectivity' },
+    { icon: '🐍', title: 'Python',          desc: 'Detects or installs via Homebrew' },
+    { icon: '👤', title: 'Service user',    desc: "Creates '_siemagt' system account" },
+    { icon: '📦', title: 'Download',        desc: 'Fetches agent archive from backend' },
+    { icon: '📚', title: 'Virtualenv',      desc: 'Isolated venv + pip install' },
+    { icon: '⚙️', title: 'Config',          desc: 'Writes config.yaml with macOS log paths' },
+    { icon: '🚀', title: 'LaunchDaemon',   desc: 'Installs & loads com.securewatch.siem-agent plist' },
   ],
   docker: [
     { icon: '🐳', title: 'Docker Compose', desc: 'Add the snippet to your compose file' },
-    { icon: '⚙️', title: 'Configure',      desc: 'Set MANAGER_URL in environment' },
-    { icon: '🚀', title: 'Launch',         desc: 'docker compose --profile agent up -d' },
+    { icon: '⚙️', title: 'Configure',       desc: 'Set MANAGER_URL in environment' },
+    { icon: '🚀', title: 'Launch',          desc: 'docker compose --profile agent up -d' },
   ],
 }
 
+// Windows-specific quick-reference commands
+const WIN_COMMANDS = {
+  status:    'Get-ScheduledTask SIEMAgent',
+  logs:      'Get-Content C:\\ProgramData\\SIEMAgent\\agent.log -Tail 30 -Wait',
+  stop:      'Stop-ScheduledTask SIEMAgent',
+  start:     'Start-ScheduledTask SIEMAgent',
+  uninstall: 'Unregister-ScheduledTask SIEMAgent -Confirm:$false',
+  reinstall: [
+    '# 1. Stop & remove old task / service',
+    'Stop-ScheduledTask "SIEMAgent" -ErrorAction SilentlyContinue',
+    'Unregister-ScheduledTask "SIEMAgent" -Confirm:$false -ErrorAction SilentlyContinue',
+    'Stop-Service "SIEMAgent" -Force -ErrorAction SilentlyContinue',
+    'sc.exe delete "SIEMAgent" 2>$null',
+    '',
+    '# 2. Download & run new installer',
+    '$url = "{URL}"',
+    'iwr $url -UseBasicParsing -OutFile "$env:TEMP\\Install-SIEMAgent.ps1"',
+    '& "$env:TEMP\\Install-SIEMAgent.ps1"',
+  ],
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
 function useClipboard(timeout = 2000) {
-  const [copied, setCopied] = useState(false)
-  const copy = useCallback((text) => {
+  const [copied, setCopied] = useState(null)
+  const copy = useCallback((text, key) => {
     navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), timeout)
+      setCopied(key)
+      setTimeout(() => setCopied(null), timeout)
     })
   }, [timeout])
   return { copied, copy }
+}
+
+function CodeBlock({ children, lang = 'bash', onCopy, copyKey, copied }) {
+  return (
+    <div className="relative rounded-xl overflow-hidden" style={{ background: '#0d1117', border: '1px solid var(--border-color)' }}>
+      <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: 'var(--border-color)', background: '#161b22' }}>
+        <div className="flex items-center gap-2">
+          {['#ef4444', '#f59e0b', '#10b981'].map((c) => (
+            <div key={c} className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />
+          ))}
+          <span className="ml-1 text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{lang}</span>
+        </div>
+        {onCopy && (
+          <button
+            onClick={onCopy}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold transition-all"
+            style={{
+              background: copied === copyKey ? 'rgba(16,185,129,0.15)' : 'transparent',
+              color: copied === copyKey ? '#6ee7b7' : 'var(--text-muted)',
+              border: `1px solid ${copied === copyKey ? 'rgba(16,185,129,0.3)' : 'transparent'}`,
+            }}
+          >
+            <CopyIcon copied={copied === copyKey} />
+            {copied === copyKey ? 'Copied' : 'Copy'}
+          </button>
+        )}
+      </div>
+      <pre className="px-4 py-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed" style={{ color: '#e2e8f0', maxHeight: 160 }}>
+        {children}
+      </pre>
+    </div>
+  )
 }
 
 // ── component ────────────────────────────────────────────────────────────────
@@ -93,34 +148,42 @@ export default function DeployModal({ onClose }) {
   const [tab, setTab]               = useState('linux')
   const [managerUrl, setManagerUrl] = useState(API_BASE)
   const [agentName, setAgentName]   = useState('')
+  const [agentSecret, setAgentSecret] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [stepsOpen, setStepsOpen]   = useState(false)
+  const [winCmdOpen, setWinCmdOpen] = useState(false)
   const { copied, copy }            = useClipboard()
 
   const effectiveName = agentName.trim() || 'my-agent'
+  const base = managerUrl.replace(/\/$/, '')
 
-  // one-liner curl command shown to user
+  const buildUrl = (os) =>
+    `${base}/api/installer/${os}?manager_url=${encodeURIComponent(base)}&agent_name=${encodeURIComponent(effectiveName)}` +
+    (agentSecret ? `&agent_secret=${encodeURIComponent(agentSecret)}` : '')
+
   const oneLiner = {
-    linux:   `curl -fsSL "${managerUrl}/api/installer/linux?manager_url=${encodeURIComponent(managerUrl)}&agent_name=${encodeURIComponent(effectiveName)}" | sudo bash`,
-    windows: `Set-ExecutionPolicy Bypass -Scope Process -Force; $url="${managerUrl}/api/installer/windows?manager_url=${encodeURIComponent(managerUrl)}&agent_name=${encodeURIComponent(effectiveName)}"; iwr $url -UseBasicParsing -OutFile "$env:TEMP\\Install-SIEMAgent.ps1"; & "$env:TEMP\\Install-SIEMAgent.ps1"`,
-    macos:   `curl -fsSL "${managerUrl}/api/installer/macos?manager_url=${encodeURIComponent(managerUrl)}&agent_name=${encodeURIComponent(effectiveName)}" | sudo bash`,
-    docker:  `# See docker-compose snippet below — copy it into your compose file`,
+    linux:   `curl -fsSL "${buildUrl('linux')}" | sudo bash`,
+    windows: `Set-ExecutionPolicy Bypass -Scope Process -Force; $url="${buildUrl('windows')}"; iwr $url -UseBasicParsing -OutFile "$env:TEMP\\Install-SIEMAgent.ps1"; & "$env:TEMP\\Install-SIEMAgent.ps1"`,
+    macos:   `curl -fsSL "${buildUrl('macos')}" | sudo bash`,
+    docker:  `# See docker-compose snippet below`,
   }
 
-  const downloadUrl = {
-    linux:   `${managerUrl}/api/installer/linux?manager_url=${encodeURIComponent(managerUrl)}&agent_name=${encodeURIComponent(effectiveName)}`,
-    windows: `${managerUrl}/api/installer/windows?manager_url=${encodeURIComponent(managerUrl)}&agent_name=${encodeURIComponent(effectiveName)}`,
-    macos:   `${managerUrl}/api/installer/macos?manager_url=${encodeURIComponent(managerUrl)}&agent_name=${encodeURIComponent(effectiveName)}`,
-    docker:  `${managerUrl}/api/installer/docker?manager_url=${encodeURIComponent(managerUrl)}&agent_name=${encodeURIComponent(effectiveName)}`,
+  const downloadFilename = {
+    linux: 'install-siem-agent.sh',
+    windows: 'Install-SIEMAgent.ps1',
+    macos: 'install-siem-agent-macos.sh',
+    docker: 'docker-compose-agent.yml',
   }
 
-  const downloadFilename = { linux: 'install-siem-agent.sh', windows: 'Install-SIEMAgent.ps1', macos: 'install-siem-agent-macos.sh', docker: 'docker-compose-agent.yml' }
+  const reinstallScript = WIN_COMMANDS.reinstall
+    .join('\n')
+    .replace('{URL}', buildUrl('windows'))
 
   const handleDownload = async () => {
     setDownloading(true)
     try {
       const token = localStorage.getItem('access_token')
-      const res = await fetch(downloadUrl[tab], {
+      const res = await fetch(buildUrl(tab), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (!res.ok) throw new Error(res.statusText)
@@ -135,25 +198,32 @@ export default function DeployModal({ onClose }) {
     setDownloading(false)
   }
 
-  const activeTab  = TABS.find((t) => t.id === tab)
-  const steps      = STEPS[tab] || []
+  const activeTab = TABS.find((t) => t.id === tab)
+  const steps     = STEPS[tab] || []
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 animate-fade-in"
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)' }}
-      onClick={(e) => e.target === e.currentTarget && onClose()}>
-
-      <div className="w-full max-w-2xl rounded-2xl overflow-hidden animate-slide-down"
-        style={{ background: 'var(--bg-card)', border: `1px solid ${activeTab.color}30`,
-          boxShadow: `0 25px 80px rgba(0,0,0,0.8), 0 0 0 1px ${activeTab.color}15` }}>
-
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="w-full max-w-2xl rounded-2xl overflow-hidden"
+        style={{
+          background: 'var(--bg-card)',
+          border: `1px solid ${activeTab.color}30`,
+          boxShadow: `0 25px 80px rgba(0,0,0,0.8), 0 0 0 1px ${activeTab.color}15`,
+          maxHeight: '90vh',
+          overflowY: 'auto',
+        }}
+      >
         {/* ── header ── */}
-        <div className="relative px-6 pt-5 pb-4 overflow-hidden"
-          style={{ background: `linear-gradient(135deg, var(--bg-secondary), ${activeTab.color}06)`,
-            borderBottom: '1px solid var(--border-color)' }}>
+        <div
+          className="relative px-6 pt-5 pb-4 overflow-hidden sticky top-0 z-10"
+          style={{ background: `linear-gradient(135deg, var(--bg-secondary), ${activeTab.color}06)`, borderBottom: '1px solid var(--border-color)' }}
+        >
           <div className="absolute top-0 right-0 w-48 h-48 pointer-events-none"
-            style={{ background: `radial-gradient(circle, ${activeTab.color}10 0%, transparent 70%)`,
-              transform: 'translate(30%,-30%)' }} />
+            style={{ background: `radial-gradient(circle, ${activeTab.color}10 0%, transparent 70%)`, transform: 'translate(30%,-30%)' }} />
           <div className="relative flex items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -161,11 +231,14 @@ export default function DeployModal({ onClose }) {
                   style={{ background: `${activeTab.color}18`, color: activeTab.color }}>
                   <activeTab.Icon />
                 </div>
-                <h2 className="text-lg font-black text-white">{t('agents.deployTitle')}</h2>
+                <h2 className="text-lg font-black text-white">Deploy Agent</h2>
               </div>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{t('agents.deploySubtitle')}</p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                One-command installer for Linux, Windows, macOS and Docker
+              </p>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-lg"
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-lg"
               style={{ background: 'var(--bg-card-hover)', color: 'var(--text-secondary)' }}>×</button>
           </div>
         </div>
@@ -190,105 +263,182 @@ export default function DeployModal({ onClose }) {
           })}
         </div>
 
-        {/* ── form ── */}
         <div className="px-6 py-4 space-y-4">
+          {/* ── form ── */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold mb-1.5 uppercase tracking-wider"
-                style={{ color: 'var(--text-muted)' }}>
-                {t('agents.deployManagerUrl')}
+              <label className="block text-xs font-bold mb-1.5 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Manager URL
               </label>
               <input value={managerUrl} onChange={(e) => setManagerUrl(e.target.value)}
-                className="w-full font-mono text-xs" placeholder="http://your-server:8000" />
+                className="w-full font-mono text-xs" placeholder="http://your-server:8080" />
             </div>
             <div>
-              <label className="block text-xs font-bold mb-1.5 uppercase tracking-wider"
-                style={{ color: 'var(--text-muted)' }}>
-                {t('agents.deployAgentName')}
+              <label className="block text-xs font-bold mb-1.5 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Agent Name
               </label>
               <input value={agentName} onChange={(e) => setAgentName(e.target.value)}
                 className="w-full" placeholder="web-server-01" />
             </div>
           </div>
 
-          {/* one-liner */}
+          <div>
+            <label className="block text-xs font-bold mb-1.5 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              Agent Secret <span className="font-normal opacity-60">(optional — set in .env AGENT_SECRET)</span>
+            </label>
+            <input
+              value={agentSecret}
+              onChange={(e) => setAgentSecret(e.target.value)}
+              className="w-full font-mono text-xs"
+              type="password"
+              placeholder="leave blank if AGENT_SECRET not configured"
+            />
+          </div>
+
+          {/* ── one-liner ── */}
           {tab !== 'docker' && (
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider"
-                  style={{ color: 'var(--text-muted)' }}>
-                  {t('agents.deployOneLiner')}
+                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  {tab === 'windows' ? 'Elevated PowerShell — one command' : 'Terminal — one command'}
                 </label>
-                <button onClick={() => copy(oneLiner[tab])}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-                  style={{
-                    background: copied ? 'rgba(16,185,129,0.15)' : 'var(--bg-secondary)',
-                    color:      copied ? '#6ee7b7' : 'var(--text-muted)',
-                    border:     `1px solid ${copied ? 'rgba(16,185,129,0.3)' : 'var(--border-color)'}`,
-                  }}>
-                  <CopyIcon copied={copied} />
-                  {copied ? t('agents.deployCopied') : t('agents.deployCopy')}
-                </button>
               </div>
-              <div className="relative rounded-xl overflow-hidden"
-                style={{ background: '#0d1117', border: '1px solid var(--border-color)' }}>
-                <div className="flex items-center gap-1.5 px-4 py-2 border-b"
-                  style={{ borderColor: 'var(--border-color)', background: '#161b22' }}>
-                  {['#ef4444','#f59e0b','#10b981'].map((c) => (
-                    <div key={c} className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />
-                  ))}
-                  <span className="ml-2 text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
-                    {tab === 'windows' ? 'powershell' : 'bash'}
-                  </span>
-                </div>
-                <pre className="px-4 py-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"
-                  style={{ color: '#e2e8f0', maxHeight: 80 }}>
-                  <span style={{ color: '#7ee787' }}>$</span>{' '}
-                  <span style={{ color: '#79c0ff' }}>{oneLiner[tab]}</span>
-                </pre>
-              </div>
+              <CodeBlock
+                lang={tab === 'windows' ? 'powershell' : 'bash'}
+                onCopy={() => copy(oneLiner[tab], 'oneliner')}
+                copyKey="oneliner"
+                copied={copied}
+              >
+                {oneLiner[tab]}
+              </CodeBlock>
             </div>
           )}
 
-          {/* docker compose preview */}
+          {/* ── docker snippet ── */}
           {tab === 'docker' && (
-            <div className="rounded-xl overflow-hidden"
-              style={{ background: '#0d1117', border: '1px solid var(--border-color)' }}>
-              <div className="flex items-center gap-1.5 px-4 py-2 border-b"
-                style={{ borderColor: 'var(--border-color)', background: '#161b22' }}>
-                {['#ef4444','#f59e0b','#10b981'].map((c) => (
-                  <div key={c} className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />
-                ))}
-                <span className="ml-2 text-xs font-mono" style={{ color: 'var(--text-muted)' }}>docker-compose.yml</span>
-              </div>
-              <pre className="px-4 py-3 text-xs font-mono overflow-x-auto leading-relaxed"
-                style={{ color: '#e2e8f0', maxHeight: 160 }}>
+            <CodeBlock lang="docker-compose.yml" onCopy={() => copy(`  agent:\n    build: ./agent\n    environment:\n      MANAGER_URL: ${base}\n      AGENT_NAME:  ${effectiveName}\n    volumes:\n      - /var/log:/var/log:ro\n    profiles: [agent]`, 'docker')} copyKey="docker" copied={copied}>
 {`  agent:
     build: ./agent
     environment:
-      MANAGER_URL: `}<span style={{ color: '#a5d6ff' }}>{managerUrl}</span>{`
-      AGENT_NAME:  `}<span style={{ color: '#a5d6ff' }}>{effectiveName}</span>{`
+      MANAGER_URL: ${base}
+      AGENT_NAME:  ${effectiveName}
     volumes:
       - /var/log:/var/log:ro
     profiles: [agent]`}
-              </pre>
+            </CodeBlock>
+          )}
+
+          {/* ── Windows: Task Scheduler info + management commands ── */}
+          {tab === 'windows' && (
+            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-color)' }}>
+              <button
+                onClick={() => setWinCmdOpen(!winCmdOpen)}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors"
+                style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+              >
+                <span>Windows — Management Commands</span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)', transform: winCmdOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
+              </button>
+              {winCmdOpen && (
+                <div className="divide-y p-4 space-y-3" style={{ borderColor: 'var(--border-color)', background: 'var(--bg-card)' }}>
+
+                  {/* Info badge */}
+                  <div className="flex items-start gap-3 p-3 rounded-xl" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                    <span className="text-base mt-0.5">ℹ️</span>
+                    <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      Agent runs as a <strong>Windows Task Scheduler</strong> task (SYSTEM account), not a legacy Windows Service.
+                      No pywin32 DLL issues — works on all Windows 10/11 and Server 2016–2022.
+                    </div>
+                  </div>
+
+                  {/* Status & Logs */}
+                  <div className="grid grid-cols-2 gap-2 pt-3">
+                    {[
+                      { label: 'Check status', cmd: WIN_COMMANDS.status,   key: 'wstatus' },
+                      { label: 'View logs',     cmd: WIN_COMMANDS.logs,     key: 'wlogs'   },
+                      { label: 'Stop agent',    cmd: WIN_COMMANDS.stop,     key: 'wstop'   },
+                      { label: 'Start agent',   cmd: WIN_COMMANDS.start,    key: 'wstart'  },
+                    ].map(({ label, cmd, key }) => (
+                      <div key={key}>
+                        <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
+                        <div className="relative">
+                          <pre className="text-xs font-mono px-3 py-2 rounded-lg pr-10 overflow-x-auto"
+                            style={{ background: '#0d1117', color: '#79c0ff', border: '1px solid var(--border-color)' }}>
+                            {cmd}
+                          </pre>
+                          <button
+                            onClick={() => copy(cmd, key)}
+                            className="absolute right-2 top-1.5 p-1 rounded"
+                            style={{ color: copied === key ? '#6ee7b7' : 'var(--text-muted)' }}
+                          >
+                            <CopyIcon copied={copied === key} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Reinstall */}
+                  <div className="pt-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+                        Clean reinstall (run in elevated PowerShell)
+                      </div>
+                      <button
+                        onClick={() => copy(reinstallScript, 'wreinstall')}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold"
+                        style={{
+                          background: copied === 'wreinstall' ? 'rgba(16,185,129,0.15)' : 'var(--bg-secondary)',
+                          color: copied === 'wreinstall' ? '#6ee7b7' : 'var(--text-muted)',
+                          border: `1px solid ${copied === 'wreinstall' ? 'rgba(16,185,129,0.3)' : 'var(--border-color)'}`,
+                        }}
+                      >
+                        <CopyIcon copied={copied === 'wreinstall'} />
+                        {copied === 'wreinstall' ? 'Copied' : 'Copy all'}
+                      </button>
+                    </div>
+                    <pre className="text-xs font-mono px-4 py-3 rounded-xl overflow-x-auto leading-relaxed"
+                      style={{ background: '#0d1117', color: '#e2e8f0', border: '1px solid var(--border-color)', maxHeight: 200 }}>
+                      {reinstallScript}
+                    </pre>
+                  </div>
+
+                  {/* Uninstall */}
+                  <div className="pt-3">
+                    <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Uninstall</div>
+                    <div className="relative">
+                      <pre className="text-xs font-mono px-3 py-2 rounded-lg pr-10 overflow-x-auto"
+                        style={{ background: '#0d1117', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)' }}>
+                        {WIN_COMMANDS.uninstall}
+                      </pre>
+                      <button
+                        onClick={() => copy(WIN_COMMANDS.uninstall, 'wuninstall')}
+                        className="absolute right-2 top-1.5 p-1 rounded"
+                        style={{ color: copied === 'wuninstall' ? '#6ee7b7' : 'var(--text-muted)' }}
+                      >
+                        <CopyIcon copied={copied === 'wuninstall'} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* steps accordion */}
-          <div className="rounded-xl overflow-hidden"
-            style={{ border: '1px solid var(--border-color)' }}>
-            <button onClick={() => setStepsOpen(!stepsOpen)}
+          {/* ── Steps accordion ── */}
+          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-color)' }}>
+            <button
+              onClick={() => setStepsOpen(!stepsOpen)}
               className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors"
-              style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-              <span>{t('agents.deployWhatHappens')}</span>
+              style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+            >
+              <span>What happens during installation?</span>
               <span className="text-xs" style={{ color: 'var(--text-muted)', transform: stepsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
             </button>
             {stepsOpen && (
               <div className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
                 {steps.map(({ icon, title, desc }, i) => (
-                  <div key={i} className="flex items-center gap-3 px-4 py-2.5"
-                    style={{ background: 'var(--bg-card)' }}>
+                  <div key={i} className="flex items-center gap-3 px-4 py-2.5" style={{ background: 'var(--bg-card)' }}>
                     <span className="w-7 h-7 rounded-lg flex items-center justify-center text-base flex-shrink-0"
                       style={{ background: `${activeTab.color}12` }}>
                       {icon}
@@ -305,35 +455,37 @@ export default function DeployModal({ onClose }) {
         </div>
 
         {/* ── footer ── */}
-        <div className="flex items-center justify-between gap-3 px-6 py-4"
-          style={{ borderTop: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+        <div
+          className="flex items-center justify-between gap-3 px-6 py-4 sticky bottom-0"
+          style={{ borderTop: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}
+        >
           <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
             <span>📡</span>
-            <span>{t('agents.deployRequires')}</span>
+            <span>Backend must be reachable from target machine</span>
           </div>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold"
-              style={{ background: 'var(--bg-card)', color: 'var(--text-secondary)',
-                border: '1px solid var(--border-color)' }}>
-              {t('common.cancel')}
+            <button onClick={onClose}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: 'var(--bg-card)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+              Cancel
             </button>
             <button onClick={handleDownload} disabled={downloading}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all"
               style={{
-                background: downloading ? `${activeTab.color}20` : `${activeTab.color}18`,
-                color:      activeTab.color,
-                border:     `1px solid ${activeTab.color}40`,
-                opacity:    downloading ? 0.7 : 1,
+                background: `${activeTab.color}18`,
+                color: activeTab.color,
+                border: `1px solid ${activeTab.color}40`,
+                opacity: downloading ? 0.7 : 1,
               }}>
               {downloading
                 ? <><span className="w-3.5 h-3.5 border-2 rounded-full animate-spin flex-shrink-0"
                     style={{ borderColor: `${activeTab.color}30`, borderTopColor: activeTab.color }} />
-                  {t('agents.deployDownloading')}</>
+                  Downloading...</>
                 : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
                     <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                     <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                   </svg>
-                  {t('agents.deployDownload')} {downloadFilename[tab]}</>
+                  Download {downloadFilename[tab]}</>
               }
             </button>
           </div>
